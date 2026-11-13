@@ -13,4 +13,11 @@ data class InputSettings(
      * leaves the pen, eraser, shape and lasso tools to a stylus or mouse.
      */
     val drawWithFinger: Boolean = false,
+    /**
+     * Whether the pen's own motor vibrates: a texture while it writes and a click on its
+     * commands. On until turned off — a pen that has one earns its feel by default.
+     */
+    val penHaptics: Boolean = true,
+    /** What the pen's barrel buttons and extra keys do, kept here as Android keeps its click counts. */
+    val penButtons: PenButtonSettings = PenButtonSettings(),
 )

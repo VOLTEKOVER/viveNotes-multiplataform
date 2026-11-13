@@ -1,19 +1,27 @@
 package com.vivenotes.desktop
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.vivenotes.App
+import com.vivenotes.desktop.pen.WindowsPenHaptics
 import com.vivenotes.desktop.titlebar.TitleBar
 import com.vivenotes.desktop.touch.DesktopTouch
 import com.vivenotes.desktop.update.DesktopUpdates
 import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.localization.Localization
+import com.vivenotes.workspace.LocalPenHaptics
+import com.vivenotes.workspace.PenHaptics
 import kotlinx.coroutines.runBlocking
 import java.awt.Dimension
 
@@ -103,19 +111,34 @@ private fun launchStandardWindow(notes: DesktopNotes, profile: DesktopProfile, l
                 DesktopTouch.attachPointers(window, log)
                 CopyOnlyDrops.install(window, log)
             }
-            App(notes.session, remember(window) { notes.pictures(window) }, notes.interfaceSettings,
-                notes::updateInterfaceSettings, notes.viewSettings, notes::updateViewSettings,
-                notes.keyBindings, notes::updateKeyBindings,
-                inputSettings = notes.inputSettings, onInputSettingsChange = notes::updateInputSettings,
-                notebookFiles = remember(window) { notes.notebookFiles(window) }, thumbnails = notes.thumbnails,
-                pdfExporter = remember(window) { notes.pdfExporter(window) },
-                fileImporter = remember(window) { notes.fileImporter(window) },
-                onEditorDefaultsChange = notes::updateEditorDefaults,
-                onShapeSettingsChange = notes::updateShapeSettings, onInkSettingsChange = notes::updateInkSettings,
-                accountHost = notes.sync?.accountHost,
-                aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
-                appVersion = DesktopBuildInfo.version, debugLog = log, developmentBuild = profile.developmentBuild,
-                clipboardHtml = notes.clipboardHtml, onDarkThemeChange = { titleBar.dark = it }, updates = updates)
+            // The pen's own motor, where Windows offers one. The setting gates what reaches the
+            // workspace rather than the driver, so turning it off is felt without a restart.
+            var penHaptics by remember { mutableStateOf<PenHaptics?>(null) }
+            DisposableEffect(window) {
+                val haptics = WindowsPenHaptics.create(log)
+                penHaptics = haptics
+                onDispose {
+                    penHaptics = null
+                    haptics?.close()
+                }
+            }
+            CompositionLocalProvider(
+                LocalPenHaptics provides penHaptics?.takeIf { notes.inputSettings.penHaptics },
+            ) {
+                App(notes.session, remember(window) { notes.pictures(window) }, notes.interfaceSettings,
+                    notes::updateInterfaceSettings, notes.viewSettings, notes::updateViewSettings,
+                    notes.keyBindings, notes::updateKeyBindings,
+                    inputSettings = notes.inputSettings, onInputSettingsChange = notes::updateInputSettings,
+                    notebookFiles = remember(window) { notes.notebookFiles(window) }, thumbnails = notes.thumbnails,
+                    pdfExporter = remember(window) { notes.pdfExporter(window) },
+                    fileImporter = remember(window) { notes.fileImporter(window) },
+                    onEditorDefaultsChange = notes::updateEditorDefaults,
+                    onShapeSettingsChange = notes::updateShapeSettings, onInkSettingsChange = notes::updateInkSettings,
+                    accountHost = notes.sync?.accountHost,
+                    aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
+                    appVersion = DesktopBuildInfo.version, debugLog = log, developmentBuild = profile.developmentBuild,
+                    clipboardHtml = notes.clipboardHtml, onDarkThemeChange = { titleBar.dark = it }, updates = updates)
+            }
         }
     }
 }

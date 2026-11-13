@@ -744,7 +744,7 @@ internal fun PageCanvas(
                                 interaction.panActive = false
                             }
                             event.changes.forEach { it.consume() }
-                        } else if (event.type == PointerEventType.Press && event.buttons.isTertiaryPressed) {
+                        } else if (event.type == PointerEventType.Press && event.buttons.isTertiaryPressed && !change.isConsumed) {
                             interaction.panAnchor = change.position
                             interaction.panPointer = change.position
                             interaction.panActive = true

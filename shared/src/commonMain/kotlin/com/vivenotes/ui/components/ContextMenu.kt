@@ -42,7 +42,8 @@ import androidx.compose.ui.unit.round
  * right-click, as Android's long-press opens the same menus.
  *
  * The press is taken in the initial pass, before anything inside sees it, so a text field's own
- * menu, a row's click and a selection gesture all stay out of it. Other buttons pass untouched.
+ * menu, a row's click and a selection gesture all stay out of it. Other buttons pass untouched,
+ * and so does a press an ancestor above has already claimed — a pen's bound barrel button.
  */
 fun Modifier.onSecondaryPress(key: Any?, onPress: (Offset) -> Unit): Modifier = pointerInput(key, onPress) {
     awaitPointerEventScope {
@@ -50,6 +51,7 @@ fun Modifier.onSecondaryPress(key: Any?, onPress: (Offset) -> Unit): Modifier = 
             val event = awaitPointerEvent(PointerEventPass.Initial)
             if (event.type != PointerEventType.Press || !event.buttons.isSecondaryPressed) continue
             val change = event.changes.firstOrNull() ?: continue
+            if (change.isConsumed) continue
             event.changes.forEach { it.consume() }
             onPress(change.position)
         }

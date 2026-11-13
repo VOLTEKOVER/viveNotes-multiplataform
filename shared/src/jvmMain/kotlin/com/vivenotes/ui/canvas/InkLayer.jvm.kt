@@ -33,6 +33,8 @@ import com.vivenotes.ink.withDesktopEdit
 import com.vivenotes.model.ink.InkPage
 import com.vivenotes.model.newId
 import com.vivenotes.workspace.InkTool
+import com.vivenotes.workspace.LocalPenHaptics
+import com.vivenotes.workspace.penHapticFeel
 import java.util.Collections
 import java.util.IdentityHashMap
 import kotlinx.coroutines.delay
@@ -103,6 +105,7 @@ internal actual fun PlatformInkLayer(
     val currentSettings by rememberUpdatedState(settings)
     val currentRuler by rememberUpdatedState(ruler)
     val currentStraighten by rememberUpdatedState(onStraighten)
+    val currentPenHaptics by rememberUpdatedState(LocalPenHaptics.current)
     var holdCandidate by remember(controller) { mutableStateOf<HoldCandidate?>(null) }
     var holdRevision by remember(controller) { mutableIntStateOf(0) }
     LaunchedEffect(holdCandidate, holdRevision) {
@@ -180,7 +183,7 @@ internal actual fun PlatformInkLayer(
             }
         }
     }
-    val input = if (tool == null) Modifier else if (tool == InkTool.Eraser)
+    val input = if (tool == null) Modifier else
         Modifier.pointerInput(pageId, tool, penIndex, eraserMode, settings.eraser.sizeDp, density, zoom, titleFloorDp) {
             coroutineScope {
                 var anchor = currentPage
@@ -223,45 +226,119 @@ internal actual fun PlatformInkLayer(
                             down.position.y < titleFloorDp * density) {
                             return@awaitEachInkGesture
                         }
-                        refresh()
-                        inkInputActive = true
-                        val capturedGeneration = generation
-                        val gesture = DesktopPartialEraseGesture(projected, density, settings.eraser.sizeDp, mode = eraserMode)
-                        val callback = currentCallback
-                        fun observe(sample: InkPointerSample, position: Offset) {
-                            gesture.observe(sample)
-                            eraserPoint = position
+                        // The tool this stroke runs with, decided as the pen touches down: a pen
+                        // held upside down erases whatever is armed, as the armed eraser does.
+                        val stroke = strokeTool(tool, down.type)
+                        val haptics = currentPenHaptics?.takeIf {
+                            down.type == PointerType.Stylus || down.type == PointerType.Eraser
                         }
-                        diagnostics?.inputObserved()
-                        observe(down.inkSample(includePressure = false), down.position)
-                        eraseObservation = gesture.observation(projected)
-                        down.consume()
-                        var finished = false
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id }
-                            if (change == null || change.isConsumed || !refresh() || generation != capturedGeneration ||
-                                (down.type == PointerType.Touch && event.changes.count { it.pressed && it.type == PointerType.Touch } > 1)) break
-                            diagnostics?.inputObserved(1 + change.historical.size)
-                            change.historical.forEach { historical ->
-                                observe(change.inkSample(historical.position, historical.uptimeMillis, false), historical.position)
+                        val feel = penHapticFeel(stroke, currentSettings.pen(penIndex).brush)
+                        if (haptics != null && feel != null) haptics.inkStart(down.id.value, feel)
+                        try {
+                            if (stroke == InkTool.Eraser) {
+                                refresh()
+                                inkInputActive = true
+                                val capturedGeneration = generation
+                                val gesture = DesktopPartialEraseGesture(projected, density, settings.eraser.sizeDp, mode = eraserMode)
+                                val callback = currentCallback
+                                fun observe(sample: InkPointerSample, position: Offset) {
+                                    gesture.observe(sample)
+                                    eraserPoint = position
+                                }
+                                diagnostics?.inputObserved()
+                                observe(down.inkSample(includePressure = false), down.position)
+                                eraseObservation = gesture.observation(projected)
+                                down.consume()
+                                var finished = false
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || change.isConsumed || !refresh() || generation != capturedGeneration ||
+                                        (down.type == PointerType.Touch && event.changes.count { it.pressed && it.type == PointerType.Touch } > 1)) break
+                                    diagnostics?.inputObserved(1 + change.historical.size)
+                                    change.historical.forEach { historical ->
+                                        observe(change.inkSample(historical.position, historical.uptimeMillis, false), historical.position)
+                                    }
+                                    observe(change.inkSample(includePressure = false), change.position)
+                                    eraseObservation = gesture.observation(projected)
+                                    finished = change.changedToUpIgnoreConsumed() ||
+                                        (down.type == PointerType.Mouse && !event.buttons.isPrimaryPressed)
+                                    change.consume()
+                                    if (finished) break
+                                }
+                                if (finished) {
+                                    val observation = gesture.observation(projected)
+                                    val request = observation.request()
+                                    eraseObservation = observation
+                                    pendingEraseCount++
+                                    if (completed.trySend(Triple(request, capturedGeneration, callback)).isFailure) pendingEraseCount--
+                                } else { eraseObservation = null; erasePreview = null }
+                                eraserPoint = null
+                                inkInputActive = false
+                            } else {
+                                inkInputActive = true
+                                diagnostics?.inputObserved()
+                                val capturedTool = currentPen
+                                val capturedPreset = currentSettings.pen(penIndex)
+                                val callback = currentCallback
+                                val straightCallback = currentStraighten
+                                val capturedRuler = currentRuler?.takeIf {
+                                    it.engages(RulerPoint(down.position.x / density, down.position.y / density), Ruler.SNAP_TOLERANCE_DP)
+                                }
+                                val side = capturedRuler?.sideOf(RulerPoint(down.position.x / density, down.position.y / density))
+                                fun sample(change: PointerInputChange, point: Offset = change.position, time: Long = change.uptimeMillis,
+                                           pressure: Boolean = true): InkPointerSample {
+                                    val mapped = if (capturedRuler != null && side != null) {
+                                        val p = capturedRuler.snap(RulerPoint(point.x / density, point.y / density), side)
+                                        Offset(p.x.coerceAtLeast(0f) * density, p.y.coerceAtLeast(titleFloorDp) * density)
+                                    } else point
+                                    return change.inkSample(mapped, time, pressure)
+                                }
+                                val hold = if (stroke == InkTool.Pen && capturedPreset.holdForStraightLine && capturedRuler == null)
+                                    StraightenHold(viewConfiguration.touchSlop / density) else null
+                                fun observeHold(point: Offset) {
+                                    if (hold?.observe(point.x / density, point.y / density) == true) holdRevision++
+                                }
+                                holdCandidate = hold?.let { HoldCandidate(it) { line -> straightCallback(line, capturedPreset) } }
+                                observeHold(down.position)
+                                controller.begin(capturedTool.brush, sample(down), transform)
+                                diagnostics?.shapeAdvanced()
+                                frameRevision++
+                                timing.begin(down.uptimeMillis)
+                                down.consume()
+                                try {
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull { it.id == down.id }
+                                        if (change == null || change.isConsumed ||
+                                            (down.type == PointerType.Touch && event.changes.count { it.pressed && it.type == PointerType.Touch } > 1)) break
+                                        val finished = change.changedToUpIgnoreConsumed() ||
+                                            (down.type == PointerType.Mouse && !event.buttons.isPrimaryPressed)
+                                        if (hold?.spent != true) {
+                                            diagnostics?.inputObserved(1 + change.historical.size)
+                                            change.historical.forEach { historical ->
+                                                controller.append(sample(change, historical.position, historical.uptimeMillis, false))
+                                                observeHold(historical.position)
+                                            }
+                                            if (finished) {
+                                                holdCandidate = null
+                                                diagnostics?.shapeAdvanced()
+                                                controller.finish(sample(change))?.let { finishedStroke ->
+                                                    val edit = capturedTool.complete(finishedStroke, newId(), pageId, 0, System.currentTimeMillis()).desktopEdit()
+                                                    callback(edit, currentPage.withDesktopEdit(edit))
+                                                }
+                                                frameRevision++
+                                            } else {
+                                                controller.append(sample(change))
+                                                observeHold(change.position)
+                                            }
+                                        }
+                                        change.consume()
+                                        if (finished) break
+                                    }
+                                } finally { inkInputActive = false; holdCandidate = null; cancelGesture() }
                             }
-                            observe(change.inkSample(includePressure = false), change.position)
-                            eraseObservation = gesture.observation(projected)
-                            finished = change.changedToUpIgnoreConsumed() ||
-                                (down.type == PointerType.Mouse && !event.buttons.isPrimaryPressed)
-                            change.consume()
-                            if (finished) break
-                        }
-                        if (finished) {
-                            val observation = gesture.observation(projected)
-                            val request = observation.request()
-                            eraseObservation = observation
-                            pendingEraseCount++
-                            if (completed.trySend(Triple(request, capturedGeneration, callback)).isFailure) pendingEraseCount--
-                        } else { eraseObservation = null; erasePreview = null }
-                        eraserPoint = null
-                        inkInputActive = false
+                        } finally { haptics?.inkEnd() }
                     }
                 } finally {
                     queueActive = false
@@ -272,79 +349,11 @@ internal actual fun PlatformInkLayer(
                     eraseObservation = null
                     erasePreview = null
                     eraserPoint = null
+                    holdCandidate = null
+                    cancelGesture()
                 }
             }
         }
-    else Modifier.pointerInput(pageId, tool, penIndex, density, zoom, titleFloorDp) {
-        try {
-            awaitEachInkGesture {
-                val down = awaitInkDown()
-                if (down.type == PointerType.Mouse && !currentEvent.buttons.isPrimaryPressed) return@awaitEachInkGesture
-                if (down.position.y < titleFloorDp * density) return@awaitEachInkGesture
-                inkInputActive = true
-                diagnostics?.inputObserved()
-                val capturedTool = currentPen
-                val capturedPreset = currentSettings.pen(penIndex)
-                val callback = currentCallback
-                val straightCallback = currentStraighten
-                val capturedRuler = currentRuler?.takeIf {
-                    it.engages(RulerPoint(down.position.x / density, down.position.y / density), Ruler.SNAP_TOLERANCE_DP)
-                }
-                val side = capturedRuler?.sideOf(RulerPoint(down.position.x / density, down.position.y / density))
-                fun sample(change: PointerInputChange, point: Offset = change.position, time: Long = change.uptimeMillis,
-                           pressure: Boolean = true): InkPointerSample {
-                    val mapped = if (capturedRuler != null && side != null) {
-                        val p = capturedRuler.snap(RulerPoint(point.x / density, point.y / density), side)
-                        Offset(p.x.coerceAtLeast(0f) * density, p.y.coerceAtLeast(titleFloorDp) * density)
-                    } else point
-                    return change.inkSample(mapped, time, pressure)
-                }
-                val hold = if (tool == InkTool.Pen && capturedPreset.holdForStraightLine && capturedRuler == null)
-                    StraightenHold(viewConfiguration.touchSlop / density) else null
-                fun observeHold(point: Offset) {
-                    if (hold?.observe(point.x / density, point.y / density) == true) holdRevision++
-                }
-                holdCandidate = hold?.let { HoldCandidate(it) { line -> straightCallback(line, capturedPreset) } }
-                observeHold(down.position)
-                controller.begin(capturedTool.brush, sample(down), transform)
-                diagnostics?.shapeAdvanced()
-                frameRevision++
-                timing.begin(down.uptimeMillis)
-                down.consume()
-                try {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id }
-                        if (change == null || change.isConsumed ||
-                            (down.type == PointerType.Touch && event.changes.count { it.pressed && it.type == PointerType.Touch } > 1)) break
-                        val finished = change.changedToUpIgnoreConsumed() ||
-                            (down.type == PointerType.Mouse && !event.buttons.isPrimaryPressed)
-                        if (hold?.spent != true) {
-                            diagnostics?.inputObserved(1 + change.historical.size)
-                            change.historical.forEach { historical ->
-                                controller.append(sample(change, historical.position, historical.uptimeMillis, false))
-                                observeHold(historical.position)
-                            }
-                            if (finished) {
-                                holdCandidate = null
-                                diagnostics?.shapeAdvanced()
-                                controller.finish(sample(change))?.let { stroke ->
-                                    val edit = capturedTool.complete(stroke, newId(), pageId, 0, System.currentTimeMillis()).desktopEdit()
-                                    callback(edit, currentPage.withDesktopEdit(edit))
-                                }
-                                frameRevision++
-                            } else {
-                                controller.append(sample(change))
-                                observeHold(change.position)
-                            }
-                        }
-                        change.consume()
-                        if (finished) break
-                    }
-                } finally { inkInputActive = false; holdCandidate = null; cancelGesture() }
-            }
-        } finally { holdCandidate = null; cancelGesture() }
-    }
     // Extent reports arbitrarily large document sizes while measuring the child unbounded.
     // Draw and input belong outside it so their coordinate space is the reported page, not that
     // child's zero-sized layout. This also avoids packing huge paired fixed constraints.

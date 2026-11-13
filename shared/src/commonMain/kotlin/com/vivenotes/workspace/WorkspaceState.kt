@@ -328,6 +328,28 @@ data class WorkspaceState(
         return selectPointer().copy(inkTool = tool, activePenIndex = penIndex.coerceIn(0, 2))
     }
 
+    /**
+     * Arms [action] from a pen barrel button or one of the pen's keys, as the Draw ribbon does.
+     * Undo and Redo never arrive here — they act on the page, not the hand, and the shortcut
+     * runner sends them where undo goes. Returns this unchanged when nothing could come of the
+     * press — no editable page, a transfer running, the page not yet ink-ready — so the key
+     * falls through as unused; the ink-ready check comes before the tab switch, so an inert press
+     * leaves the ribbon where it was.
+     */
+    fun armPenAction(action: PenAction): WorkspaceState {
+        val page = editablePage ?: return this
+        if (notebookTransfer.running || filePane.busy) return this
+        if (action == PenAction.Lasso) {
+            // Armed already: the press puts it away. Not armed: it takes the Draw tab with it,
+            // as the ribbon's Lasso button does.
+            return if (objectLassoArmed) toggleObjectLasso()
+            else selectRibbonTab(RibbonTab.Draw).toggleObjectLasso()
+        }
+        val (tool, pen) = inkToolFrom(action, inkTool, activePenIndex) ?: return this
+        if (!page.inkReady) return this
+        return selectRibbonTab(RibbonTab.Draw).selectInkTool(tool, pen)
+    }
+
     fun selectDrawPlacement(tool: DrawPlacementTool): WorkspaceState =
         if (editablePage == null || notebookTransfer.running || filePane.busy) this else selectPointer().copy(drawPlacement = tool)
 

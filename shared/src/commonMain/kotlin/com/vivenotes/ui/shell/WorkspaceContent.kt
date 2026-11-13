@@ -31,6 +31,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
 import com.vivenotes.data.rememberTextClipboard
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
@@ -68,7 +74,10 @@ import com.vivenotes.workspace.FilePane
 import com.vivenotes.workspace.InkSettings
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.KeyBindings
+import com.vivenotes.workspace.LocalPenHaptics
 import com.vivenotes.workspace.NavigationActions
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.RibbonTab
 import com.vivenotes.workspace.ShapeToolSettings
 import com.vivenotes.workspace.ShortcutAction
@@ -76,6 +85,7 @@ import com.vivenotes.workspace.ShortcutScope
 import com.vivenotes.workspace.TabsLayout
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.WorkspaceState
+import com.vivenotes.workspace.penBarrelAction
 import com.vivenotes.workspace.toggleNavigation
 import kotlinx.coroutines.flow.first
 
@@ -157,6 +167,8 @@ internal fun WorkspaceContent(
         openPane = if (openPane == pane) null else pane
     }
     var editingShortcut by remember { mutableStateOf<ShortcutAction?>(null) }
+    /** The hardware-key slot whose capture dialog is open, as [editingShortcut] is for chords. */
+    var editingPenKey by remember { mutableStateOf<Int?>(null) }
     var linkEditor by remember { mutableStateOf<LinkEditorRequest?>(null) }
     var pictureDialog by remember { mutableStateOf<PictureDialog?>(null) }
     var confirmResetShortcuts by remember { mutableStateOf(false) }
@@ -220,6 +232,7 @@ internal fun WorkspaceContent(
         }
     }
     val currentBindings by rememberUpdatedState(bindings)
+    val currentPenButtons by rememberUpdatedState(input.penButtons)
     val shortcuts = WorkspaceShortcuts({ currentState }, onStateChange, ::applyEditorCommand, navigation,
         viewActions, TextClipboardActions(rememberTextClipboard(), ::applyEditorCommand, LocalClipboardHtml.current),
         canvasPaste = { keyboardPaste.paste() },
@@ -227,7 +240,9 @@ internal fun WorkspaceContent(
             fileActions?.closePane()
             openPane = DockedPane.Search
             searchFocusTick++
-        } })
+        } },
+        penHaptics = LocalPenHaptics.current)
+    val currentShortcuts by rememberUpdatedState(shortcuts)
     LaunchedEffect(state.navigationVisible, state.pageListVisible) {
         debugLog.event("navigation") { "visibility notebooks=${state.navigationVisible} pages=${state.pageListVisible}" }
     }
@@ -251,12 +266,40 @@ internal fun WorkspaceContent(
                             true
                         } else false
                     } ||
-                        shortcutKeys.dispatch(event, currentBindings, ShortcutScope.Anywhere, shortcuts::run)
+                        // The pen's own keys, between the dismissals and the keyboard's chords: a
+                        // key bound in Settings → Hardware → Stylus is the pen's, not the keyboard's.
+                        shortcutKeys.dispatchPen(event, currentPenButtons, currentShortcuts::pen) ||
+                        shortcutKeys.dispatch(event, currentBindings, ShortcutScope.Anywhere, currentShortcuts::run)
                 }
                 .onKeyEvent { event ->
-                    shortcutKeys.dispatch(event, currentBindings, ShortcutScope.Workspace, shortcuts::run) ||
+                    shortcutKeys.dispatch(event, currentBindings, ShortcutScope.Workspace, currentShortcuts::run) ||
                         !textInput.typing &&
-                        shortcutKeys.dispatch(event, currentBindings, ShortcutScope.OutsideText, shortcuts::run)
+                        shortcutKeys.dispatch(event, currentBindings, ShortcutScope.OutsideText, currentShortcuts::run)
+                }
+                // The pen's barrel buttons, ahead of everything on the page: Windows reports raw
+                // button state rather than counting the pen's own clicks, so the press itself runs
+                // the command. Only a stylus or eraser pointer counts — a mouse's right button
+                // keeps its menus and its panning — and the press is consumed only when the command
+                // ran, so an unbound barrel still reaches the page.
+                .pointerInput(Unit) {
+                    awaitPointerEventScope {
+                        var secondary = false
+                        var tertiary = false
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pen = event.changes.firstOrNull {
+                                it.type == PointerType.Stylus || it.type == PointerType.Eraser
+                            } ?: continue
+                            // However the pen's buttons arrive — a fresh press, or a barrel pressed
+                            // while the tip is already down — what runs is the button that went down.
+                            val action = penBarrelAction(secondary, tertiary,
+                                event.buttons.isSecondaryPressed, event.buttons.isTertiaryPressed, currentPenButtons)
+                            secondary = event.buttons.isSecondaryPressed
+                            tertiary = event.buttons.isTertiaryPressed
+                            if (action == null || action == PenAction.None) continue
+                            if (currentShortcuts.pen(action)) event.changes.forEach { it.consume() }
+                        }
+                    }
                 }
                 .focusRequester(canvasFocusRequester)
                 .focusable(),
@@ -424,6 +467,7 @@ internal fun WorkspaceContent(
                         onInputChange = onInputChange,
                         bindings = bindings,
                         onEditShortcut = { editingShortcut = it },
+                        onEditPenKey = { editingPenKey = it },
                         onBindingsChange = onBindingsChange,
                         onResetShortcuts = { confirmResetShortcuts = true },
                         search = search,
@@ -482,6 +526,12 @@ internal fun WorkspaceContent(
             onDismissNotebook = { notebookConfirmation = null },
             editingShortcut = editingShortcut,
             onDismissShortcut = { editingShortcut = null },
+            editingPenKey = editingPenKey,
+            onDismissPenKey = { editingPenKey = null },
+            penButtons = input.penButtons,
+            onSetPenKey = { slot, binding ->
+                onInputChange(input.copy(penButtons = input.penButtons.withKey(slot, binding)))
+            },
             bindings = bindings,
             onBindingsChange = onBindingsChange,
             confirmResetShortcuts = confirmResetShortcuts,

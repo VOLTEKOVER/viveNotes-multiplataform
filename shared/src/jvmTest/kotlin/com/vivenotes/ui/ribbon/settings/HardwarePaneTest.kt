@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.key.Key
 import com.vivenotes.data.TextClipboard
 import com.vivenotes.data.LocalTextClipboard
+import com.vivenotes.localization.Strings
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -43,11 +44,15 @@ import androidx.compose.ui.text.TextRange
 import com.vivenotes.model.Mark
 import com.vivenotes.richtext.TextSelection
 import com.vivenotes.ui.components.ToolPaneTags
+import com.vivenotes.ui.keyboard.penKeyLabel
 import com.vivenotes.ui.shell.WorkspaceScreen
 import com.vivenotes.ui.shell.WorkspaceTestTags
 import com.vivenotes.ui.theme.ViveNotesTheme
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.RibbonTab
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.ShortcutKey
@@ -60,7 +65,8 @@ import kotlin.test.assertTrue
 
 /**
  * Settings → Hardware: the keyboard shortcuts it lists and rebinds, and that the workspace then
- * dispatches by those bindings, in the text box as well as on the canvas.
+ * dispatches by those bindings, in the text box as well as on the canvas. The Stylus page adds
+ * the pen's own buttons and keys, captured the same way and dispatched ahead of the keyboard.
  */
 @OptIn(ExperimentalTestApi::class)
 class HardwarePaneTest {
@@ -122,6 +128,129 @@ class HardwarePaneTest {
 
         onNodeWithTag(HardwareTags.kind(HardwareKind.Keyboard)).performClick()
         onNodeWithTag(HardwareTags.Shortcuts).assertExists()
+    }
+
+    /**
+     * The pen's rows below *Let a finger draw*: two barrel buttons and three slots for the keys a
+     * pen's driver sends, empty until a key is captured. Picking a barrel's action saves it at
+     * once, as the finger-drawing choice does.
+     */
+    @Test
+    fun thePenListsItsTwoBarrelsAndThreeKeySlots() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var saved: InputSettings? = null
+        setWorkspace(onInputChange = { saved = it })
+        openHardware()
+        onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick().assertIsSelected()
+
+        onNodeWithTag(HardwareTags.PenBarrel).performScrollTo().assertTextContains(Strings.pen_button)
+            .assertTextContains(PenAction.TogglePenEraser.label)
+        onNodeWithTag(HardwareTags.PenBarrel2).assertTextContains(Strings.pen_second_button)
+            .assertTextContains(PenAction.None.label)
+        repeat(PenButtonSettings.KEY_SLOTS) { slot ->
+            onNodeWithTag(HardwareTags.penKey(slot)).performScrollTo().assertTextContains(Strings.not_set)
+            // An empty slot has no action to pick for.
+            onNodeWithTag(HardwareTags.penKeyAction(slot)).assertTextContains(Strings.not_set)
+                .assertIsNotEnabled()
+        }
+
+        onNodeWithTag(HardwareTags.PenBarrel).performScrollTo().performClick()
+        onNodeWithTag(HardwareTags.penAction(PenAction.Eraser)).performClick()
+        runOnIdle { assertEquals(InputSettings(penButtons = PenButtonSettings(barrel = PenAction.Eraser)), saved) }
+        onNodeWithTag(HardwareTags.PenBarrel).assertTextContains(PenAction.Eraser.label)
+    }
+
+    /**
+     * Capturing a hardware key takes its slot at once, the action beside it picks what the key
+     * does, and the bound key then arms its pen from anywhere in the workspace, as a shortcut's
+     * chord does. PrintScreen is a key no keyboard shortcut can take, as a pen's keys often are.
+     */
+    @Test
+    fun aCapturedHardwareKeyArmsItsPen() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var observed = WorkspaceState.demo()
+        var saved: InputSettings? = null
+        setWorkspace(onInputChange = { saved = it }) { observed = it }
+        openHardware()
+        onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick()
+
+        onNodeWithTag(HardwareTags.penKey(0)).performScrollTo().performClick()
+        onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertExists()
+        press(listOf(Key.PrintScreen))
+
+        onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertDoesNotExist()
+        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.None)
+        runOnIdle { assertEquals(InputSettings(penButtons = PenButtonSettings().withKey(0, printScreen)), saved) }
+        onNodeWithTag(HardwareTags.penKey(0)).assertTextContains(Key.PrintScreen.penKeyLabel())
+        onNodeWithTag(HardwareTags.penKeyAction(0)).assertTextContains(PenAction.None.label).assertIsEnabled()
+
+        onNodeWithTag(HardwareTags.penKeyAction(0)).performClick()
+        onNodeWithTag(HardwareTags.penAction(PenAction.Pen2)).performClick()
+        runOnIdle { assertEquals(PenAction.Pen2, saved?.penButtons?.key(0)?.action) }
+
+        press(listOf(Key.PrintScreen))
+        runOnIdle {
+            assertEquals(RibbonTab.Draw, observed.activeTab)
+            assertEquals(InkTool.Pen, observed.inkTool)
+            assertEquals(1, observed.activePenIndex)
+        }
+    }
+
+    /** A key another slot already has waits for Replace: the key moves, and the slot it left is empty. */
+    @Test
+    fun aKeyAnotherSlotHasIsOnlyTakenOnceReplaceIsChosen() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var saved: InputSettings? = null
+        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.Pen1)
+        val withKey = InputSettings(penButtons = PenButtonSettings().withKey(0, printScreen))
+        setWorkspace(input = withKey, onInputChange = { saved = it })
+        openHardware()
+        onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick()
+
+        onNodeWithTag(HardwareTags.penKey(1)).performScrollTo().performClick()
+        press(listOf(Key.PrintScreen))
+        onNodeWithTag(ShortcutDialogTags.PenKeyCaptured, useUnmergedTree = true).onChild()
+            .assertTextContains(Key.PrintScreen.penKeyLabel())
+        onNodeWithTag(ShortcutDialogTags.PenKeyMessage, useUnmergedTree = true)
+            .assertTextContains(Strings.pen_hardware_key_value(1), substring = true)
+        runOnIdle { assertNull(saved, "a key in use was taken without asking") }
+
+        onNodeWithTag(ShortcutDialogTags.PenKeyReplace).performClick()
+        onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertDoesNotExist()
+        // The key moved with its action, and the slot it came from is empty.
+        runOnIdle { assertEquals(PenButtonSettings().withKey(1, printScreen), saved?.penButtons) }
+        onNodeWithTag(HardwareTags.penKey(0)).performScrollTo().assertTextContains(Strings.not_set)
+        onNodeWithTag(HardwareTags.penKey(1)).assertTextContains(Key.PrintScreen.penKeyLabel())
+        onNodeWithTag(HardwareTags.penKeyAction(1)).assertTextContains(PenAction.Pen1.label)
+    }
+
+    /** Esc leaves a slot as it was; Backspace clears its key, as it disables a shortcut. */
+    @Test
+    fun escCancelsAndBackspaceClearsAPenKey() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var saved: InputSettings? = null
+        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.Eraser)
+        val withKey = InputSettings(penButtons = PenButtonSettings().withKey(2, printScreen))
+        setWorkspace(input = withKey, onInputChange = { saved = it })
+        openHardware()
+        onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick()
+
+        onNodeWithTag(HardwareTags.penKey(2)).performScrollTo().performClick()
+        press(listOf(Key.Escape))
+        onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertDoesNotExist()
+        runOnIdle { assertNull(saved) }
+
+        onNodeWithTag(HardwareTags.penKey(2)).performClick()
+        press(listOf(Key.Backspace))
+        onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertDoesNotExist()
+        runOnIdle { assertEquals(InputSettings(), saved) }
+        onNodeWithTag(HardwareTags.penKey(2)).assertTextContains(Strings.not_set)
+        onNodeWithTag(HardwareTags.penKeyAction(2)).assertTextContains(Strings.not_set).assertIsNotEnabled()
+    }
+
+    /** A mouse is not a pen: its right button keeps the page's menus and never arms a barrel. */
+    @Test
+    fun theMouseSRightButtonIsNotThePenSBarrel() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var observed = WorkspaceState.demo()
+        setWorkspace { observed = it }
+        onNodeWithTag(WorkspaceTestTags.PageCanvas).performMouseInput { rightClick(Offset(700f, 500f)) }
+        runOnIdle { assertNull(observed.inkTool) }
     }
 
     /** One pane at a time, as on Android: Paper Size and Hardware replace each other. */
@@ -319,13 +448,17 @@ class HardwarePaneTest {
     private fun ComposeUiTest.setWorkspace(
         initial: WorkspaceState = WorkspaceState.demo().copy(activeTab = RibbonTab.Settings),
         bindings: KeyBindings = KeyBindings.Default,
+        input: InputSettings = InputSettings(),
         clipboard: TextClipboard? = null,
+        onInputChange: (InputSettings) -> Unit = {},
         onStateChange: (WorkspaceState) -> Unit = {},
     ) {
         setContent {
             var state by remember { mutableStateOf(initial) }
+            var inputState by remember { mutableStateOf(input) }
             val content = @androidx.compose.runtime.Composable {
                 WorkspaceScreen(state = state, onStateChange = { state = it(state); onStateChange(state) },
+                    inputSettings = inputState, onInputSettingsChange = { inputState = it; onInputChange(it) },
                     keyBindings = bindings, onKeyBindingsChange = { reported = it })
             }
             ViveNotesTheme(darkTheme = true) {

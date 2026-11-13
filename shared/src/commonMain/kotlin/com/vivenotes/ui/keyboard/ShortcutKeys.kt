@@ -12,6 +12,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenButtonSettings
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.ShortcutDecision
 import com.vivenotes.workspace.ShortcutKey
@@ -31,6 +33,15 @@ internal fun KeyEvent.toChord(): KeyChord? {
 
 /** Ctrl, Shift, Alt and Super on their own: pressed on the way to a chord, never one themselves. */
 internal fun Key.isModifier(): Boolean = this in ModifierKeys
+
+/**
+ * The shortcut table's name for this key, when it is one it lists — a pen's extra keys often are
+ * not, and the platforms without a keyboard layout of their own fall back to the key's number.
+ */
+internal fun Key.shortcutKeyLabel(): String? {
+    for ((key, shortcut) in ComposeKeys) if (key.keyCode == keyCode) return shortcut.label
+    return null
+}
 
 /**
  * Key handling shared by every place the workspace dispatches a shortcut from. [observe] must see
@@ -100,6 +111,22 @@ internal class ShortcutKeys(private val time: TimeSource = TimeSource.Monotonic)
         }
         if (used) swallowTyped = true
         return used
+    }
+
+    /**
+     * A hardware key the pen's driver sends, bound in Settings → Hardware → Stylus: runs the
+     * action its slot holds, once per press. A key bound to [PenAction.None] stays unclaimed, as
+     * on Android, so it falls through to the keyboard; any other binding claims the key whether
+     * the action found anything to do — the key is the pen's, not the keyboard's.
+     */
+    fun dispatchPen(event: KeyEvent, buttons: PenButtonSettings, run: (PenAction) -> Boolean): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val binding = buttons.bindingFor(event.key.keyCode) ?: return false
+        if (binding.action == PenAction.None) return false
+        // Holding a pen key auto-repeats on some drivers; the pen has one press in it.
+        if (repeat) return true
+        if (run(binding.action)) swallowTyped = true
+        return true
     }
 }
 

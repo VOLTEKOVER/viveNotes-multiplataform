@@ -14,9 +14,12 @@ import com.vivenotes.ui.ribbon.file.FilePaneTags
 import com.vivenotes.ui.ribbon.file.NotebookTransferDialog
 import com.vivenotes.ui.ribbon.settings.ResetAllShortcutsDialog
 import com.vivenotes.ui.ribbon.settings.ShortcutCaptureDialog
+import com.vivenotes.ui.ribbon.settings.PenKeyCaptureDialog
 import com.vivenotes.workspace.FileActions
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.NavigationActions
+import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.WorkspaceState
 
@@ -36,6 +39,13 @@ internal fun WorkspaceDialogs(
     onDismissNotebook: () -> Unit,
     editingShortcut: ShortcutAction?,
     onDismissShortcut: () -> Unit,
+    /** The hardware-key slot whose capture dialog is open, or none. */
+    editingPenKey: Int?,
+    onDismissPenKey: () -> Unit,
+    /** The pen button choices in force, whose slots the capture dialog asks about. */
+    penButtons: PenButtonSettings,
+    /** Sets [slot]'s key — [binding], or null to clear the slot. */
+    onSetPenKey: (Int, PenKeyBinding?) -> Unit,
     bindings: KeyBindings,
     onBindingsChange: (KeyBindings) -> Unit,
     confirmResetShortcuts: Boolean,
@@ -84,6 +94,18 @@ internal fun WorkspaceDialogs(
                 onDismissShortcut()
             },
             onDismiss = { onDismissShortcut() },
+        )
+    }
+    // Over the whole window, as the shortcut capture is: the key asked for may be pressed anywhere.
+    editingPenKey?.let { slot ->
+        PenKeyCaptureDialog(
+            slot = slot,
+            buttons = penButtons,
+            onSet = { binding ->
+                onSetPenKey(slot, binding)
+                onDismissPenKey()
+            },
+            onDismiss = onDismissPenKey,
         )
     }
     if (confirmResetShortcuts) {

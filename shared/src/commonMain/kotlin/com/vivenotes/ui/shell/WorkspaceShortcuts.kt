@@ -4,6 +4,8 @@ import com.vivenotes.model.Mark
 import com.vivenotes.ui.canvas.TextClipboardActions
 import com.vivenotes.ui.ribbon.view.ViewActions
 import com.vivenotes.workspace.NavigationActions
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenHaptics
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.StructuralSnapshot
 import com.vivenotes.workspace.WorkspaceState
@@ -24,6 +26,8 @@ internal class WorkspaceShortcuts(
     /** Pastes the canvas clipboard where Ctrl+V puts it; false when there was nothing to paste. */
     private val canvasPaste: () -> Boolean = { false },
     private val onSearch: (() -> Unit)? = null,
+    /** The pen's own motor, when it has one: it clicks as one of its commands runs. */
+    private val penHaptics: PenHaptics? = null,
 ) {
     fun run(action: ShortcutAction): Boolean {
         val current = state()
@@ -77,6 +81,30 @@ internal class WorkspaceShortcuts(
             ShortcutAction.ExitList -> onStateChange { it.insertPlainParagraph() }
         }
         return true
+    }
+
+    /**
+     * A pen barrel button or one of the pen's keys. Returns whether it did anything: a press
+     * nothing could come of leaves the key for whatever else wants it. [PenAction.None] never
+     * gets here — its key stays the keyboard's — and Undo and Redo speak for themselves. A press
+     * that ran clicks the pen's own motor, when it has one.
+     */
+    fun pen(action: PenAction): Boolean {
+        val ran = when (action) {
+            PenAction.None -> false
+            PenAction.Undo -> undo()
+            PenAction.Redo -> redo()
+            else -> {
+                val before = state()
+                if (before.armPenAction(action) == before) false
+                else {
+                    onStateChange { it.armPenAction(action) }
+                    true
+                }
+            }
+        }
+        if (ran) penHaptics?.commandClick()
+        return ran
     }
 
     /** Undo, from the keyboard or the header; false when there is nothing to undo. */

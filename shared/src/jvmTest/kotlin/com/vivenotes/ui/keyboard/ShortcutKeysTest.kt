@@ -6,6 +6,9 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.KeyEventType
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.ShortcutKey
 import com.vivenotes.workspace.ShortcutScope
@@ -144,5 +147,59 @@ class ShortcutKeysTest {
         assertFalse(keys.dismiss(event) { false })
         assertTrue(keys.dispatch(event, KeyBindings.Default, ShortcutScope.Anywhere) { ran += it; true })
         assertEquals(listOf(ShortcutAction.SelectTool), ran)
+    }
+
+    // The pen's keys, which the same dispatcher routes before the keyboard's chords. PrintScreen is
+    // a key no shortcut can use, as a pen's extra keys often are.
+
+    private val penButtons = PenButtonSettings(
+        keys = listOf(PenKeyBinding(Key.PrintScreen.keyCode, "Print Screen", PenAction.Pen2), null, null))
+    private val penRan = mutableListOf<PenAction>()
+
+    /** One event through the workspace's order, with the pen's keys ahead of the keyboard's. */
+    private fun pen(event: KeyEvent): Boolean =
+        keys.observe(event) || keys.dispatchPen(event, penButtons) { penRan += it; true }
+
+    @Test
+    fun aPenKeyRunsItsActionOncePerPressAndClaimsTheKey() {
+        assertTrue(pen(down(Key.PrintScreen)))
+        assertEquals(listOf(PenAction.Pen2), penRan)
+        // A held key's auto-repeat is the pen's but runs nothing, as its firmware counts clicks.
+        assertTrue(pen(down(Key.PrintScreen)))
+        assertEquals(listOf(PenAction.Pen2), penRan)
+        pen(up(Key.PrintScreen))
+        assertTrue(pen(down(Key.PrintScreen)))
+        assertEquals(listOf(PenAction.Pen2, PenAction.Pen2), penRan)
+    }
+
+    @Test
+    fun anUnboundOrUnclaimedPenKeyFallsThrough() {
+        assertFalse(pen(down(Key.F12)))
+        pen(up(Key.F12))
+        assertFalse(pen(up(Key.PrintScreen)))
+        // Bound to Nothing, a key stays the keyboard's, as on Android.
+        val unclaimed = PenButtonSettings(
+            keys = listOf(PenKeyBinding(Key.F12.keyCode, "F12", PenAction.None), null, null))
+        keys.observe(down(Key.F12))
+        assertFalse(keys.dispatchPen(down(Key.F12), unclaimed) { penRan += it; true })
+        assertTrue(penRan.isEmpty())
+    }
+
+    @Test
+    fun aPenKeyIsClaimedEvenWhenItsActionFoundNothingToDo() {
+        keys.observe(down(Key.PrintScreen))
+        assertTrue(keys.dispatchPen(down(Key.PrintScreen), penButtons) { false })
+        // What the key would have typed still types: only a used key eats its character.
+        assertFalse(keys.observe(typed('x')))
+    }
+
+    /** Regression guard, as the chord one above: a used pen key must not type into the text box. */
+    @Test
+    fun theCharacterOfAUsedPenKeyIsNotTyped() {
+        val letter = PenButtonSettings(
+            keys = listOf(PenKeyBinding(Key.X.keyCode, "X", PenAction.Pen1), null, null))
+        assertTrue(keys.observe(down(Key.X)) || keys.dispatchPen(down(Key.X), letter) { penRan += it; true })
+        assertEquals(listOf(PenAction.Pen1), penRan)
+        assertTrue(keys.observe(typed('x')), "the typed \"x\" reached the text field")
     }
 }

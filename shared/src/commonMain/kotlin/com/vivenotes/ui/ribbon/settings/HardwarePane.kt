@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -34,19 +35,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.vivenotes.ui.components.PaneGroup
+import com.vivenotes.ui.components.ScaledDropdownMenu
 import com.vivenotes.ui.components.ToolPane
 import com.vivenotes.ui.components.TooltipIconButton
+import com.vivenotes.ui.icons.DocumentSymbols
 import com.vivenotes.ui.icons.SettingsSymbols
 import com.vivenotes.ui.theme.LocalDesktopColors
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.ShortcutAction
 
 /** Semantics identifiers for the Hardware pane. */
@@ -55,9 +62,15 @@ object HardwareTags {
     const val Shortcuts = "hardware-shortcuts"
     const val ResetAll = "hardware-shortcuts-reset-all"
     const val FingerDraws = "hardware-stylus-finger-draws"
+    const val PenHaptics = "hardware-pen-haptics"
+    const val PenBarrel = "hardware-pen-barrel"
+    const val PenBarrel2 = "hardware-pen-barrel-2"
     fun kind(kind: HardwareKind): String = "hardware-${kind.name.lowercase()}"
     fun shortcut(action: ShortcutAction): String = "hardware-shortcut-${action.name}"
     fun reset(action: ShortcutAction): String = "hardware-shortcut-reset-${action.name}"
+    fun penKey(slot: Int): String = "hardware-pen-key-$slot"
+    fun penKeyAction(slot: Int): String = "hardware-pen-key-action-$slot"
+    fun penAction(action: PenAction): String = "hardware-pen-action-${action.name}"
 }
 
 /** The devices the Hardware pane has settings for, as Android's picker names them. */
@@ -70,9 +83,10 @@ enum class HardwareKind(private val labelText: () -> String) {
 
 /**
  * Settings → Hardware, docked beside the canvas as Android's pane is: the device picker, then that
- * device's settings. Stylus holds whether a finger draws. Keyboard lists the shortcuts in their
- * groups; a row opens the shortcut's key capture, a changed shortcut has its own reset, and Reset
- * All asks first. It opens on Keyboard, the device every desktop has.
+ * device's settings. Stylus holds whether a finger draws, whether the pen's motor vibrates, and
+ * what the pen's buttons do. Keyboard lists the shortcuts in their groups; a row opens the
+ * shortcut's key capture, a changed shortcut has its own reset, and Reset All asks first. It opens
+ * on Keyboard, the device every desktop has.
  */
 @Composable
 internal fun HardwarePane(
@@ -80,6 +94,8 @@ internal fun HardwarePane(
     onInputChange: (InputSettings) -> Unit,
     bindings: KeyBindings,
     onEdit: (ShortcutAction) -> Unit,
+    /** Opens the capture dialog for a hardware-key slot (0 until [PenButtonSettings.KEY_SLOTS]). */
+    onEditPenKey: (Int) -> Unit,
     onReset: (ShortcutAction) -> Unit,
     onResetAll: () -> Unit,
     onClose: () -> Unit,
@@ -88,7 +104,7 @@ internal fun HardwarePane(
     ToolPane(title = Strings.hardware, onClose = onClose) {
         HardwareKindPicker(selected = kind, onSelect = { kind = it })
         when (kind) {
-            HardwareKind.Stylus -> StylusSettings(input, onInputChange)
+            HardwareKind.Stylus -> StylusSettings(input, onInputChange, onEditPenKey)
             HardwareKind.Keyboard -> KeyboardSettings(bindings, onEdit, onReset, onResetAll)
         }
     }
@@ -97,9 +113,16 @@ internal fun HardwarePane(
 /**
  * Android's *Let a finger draw*. Off, a finger moves the page and two zoom it, and only a stylus or
  * mouse uses the drawing tools; on, a finger draws, erases and lassos too.
+ *
+ * Below it, the pen's own controls: its motor's feedback, the two barrel buttons Windows reports
+ * as raw state, and the extra keys a pen's driver spells as keyboard presses, bound in three slots.
  */
 @Composable
-private fun ColumnScope.StylusSettings(input: InputSettings, onInputChange: (InputSettings) -> Unit) {
+private fun ColumnScope.StylusSettings(
+    input: InputSettings,
+    onInputChange: (InputSettings) -> Unit,
+    onEditPenKey: (Int) -> Unit,
+) {
     PaneGroup(Strings.touch) {
         Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
@@ -119,7 +142,156 @@ private fun ColumnScope.StylusSettings(input: InputSettings, onInputChange: (Inp
             Switch(checked = input.drawWithFinger, onCheckedChange = null)
         }
     }
+    PaneGroup(Strings.stylus) {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                .toggleable(value = input.penHaptics, role = Role.Switch,
+                    onValueChange = { onInputChange(input.copy(penHaptics = it)) })
+                .testTag(HardwareTags.PenHaptics)
+                .padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(Strings.pen_haptics, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Text(Strings.pen_haptics_hint, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            // The row is the control; the switch only shows its state.
+            Switch(checked = input.penHaptics, onCheckedChange = null)
+        }
+    }
+    Text(Strings.pen_key_hint, style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 4.dp, top = 12.dp))
+    PaneGroup(Strings.pen_buttons) {
+        PenActionRow(
+            label = Strings.pen_button,
+            action = input.penButtons.barrel,
+            tag = HardwareTags.PenBarrel,
+            first = true,
+            onPick = { onInputChange(input.copy(penButtons = input.penButtons.withBarrel(it))) },
+        )
+        PenActionRow(
+            label = Strings.pen_second_button,
+            action = input.penButtons.barrel2,
+            tag = HardwareTags.PenBarrel2,
+            first = false,
+            onPick = { onInputChange(input.copy(penButtons = input.penButtons.withBarrel2(it))) },
+        )
+        repeat(PenButtonSettings.KEY_SLOTS) { slot ->
+            PenKeyRow(
+                slot = slot,
+                binding = input.penButtons.key(slot),
+                onCapture = { onEditPenKey(slot) },
+                onPick = { onInputChange(input.copy(penButtons = input.penButtons.withKeyAction(slot, it))) },
+            )
+        }
+    }
 }
+
+/**
+ * One barrel button: the whole row picks what its press does, from the same list Android offers a
+ * click count — the tools, the page's Undo and Redo, the lasso, and Nothing.
+ */
+@Composable
+private fun PenActionRow(
+    label: String,
+    action: PenAction,
+    tag: String,
+    first: Boolean,
+    onPick: (PenAction) -> Unit,
+) {
+    if (!first) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp)
+                .clickable(role = Role.DropdownList, onClick = { open = true })
+                .testTag(tag)
+                .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+            Text(action.label, style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Icon(DocumentSymbols.ArrowDropDown, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        }
+        ScaledDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            PenAction.entries.forEach { entry ->
+                DropdownMenuItem(
+                    text = { Text(entry.label) },
+                    onClick = {
+                        open = false
+                        onPick(entry)
+                    },
+                    modifier = Modifier.testTag(HardwareTags.penAction(entry)),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * One hardware-key slot: the key itself — click to capture it, Backspace in the dialog clears it —
+ * and what pressing it does. The action waits for a key: an empty slot has nothing to pick for.
+ */
+@Composable
+private fun PenKeyRow(
+    slot: Int,
+    binding: PenKeyBinding?,
+    onCapture: () -> Unit,
+    onPick: (PenAction) -> Unit,
+) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    var open by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier.fillMaxWidth().heightIn(min = 40.dp)
+            .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(Strings.pen_hardware_key_value(slot + 1), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+        Keycap(
+            binding?.label ?: Strings.not_set,
+            modifier = Modifier
+                .clickable(role = Role.Button, onClickLabel = Strings.capture_a_hardware_key, onClick = onCapture)
+                .testTag(HardwareTags.penKey(slot)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Box {
+            Row(
+                modifier = Modifier
+                    .clickable(enabled = binding != null, role = Role.DropdownList, onClick = { open = true })
+                    .alpha(if (binding == null) DisabledAlpha else 1f)
+                    .testTag(HardwareTags.penKeyAction(slot)),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(binding?.action?.label ?: Strings.not_set, style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Icon(DocumentSymbols.ArrowDropDown, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+            }
+            ScaledDropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                PenAction.entries.forEach { entry ->
+                    DropdownMenuItem(
+                        text = { Text(entry.label) },
+                        onClick = {
+                            open = false
+                            onPick(entry)
+                        },
+                        modifier = Modifier.testTag(HardwareTags.penAction(entry)),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The look of a control that cannot be used yet, as the panes' fields dim theirs. */
+private const val DisabledAlpha = 0.42f
 
 @Composable
 private fun ColumnScope.KeyboardSettings(

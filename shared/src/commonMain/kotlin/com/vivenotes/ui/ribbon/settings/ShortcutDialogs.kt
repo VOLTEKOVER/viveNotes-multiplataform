@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -33,10 +34,14 @@ import androidx.compose.ui.unit.dp
 import com.vivenotes.ui.components.DesktopDialogFrame
 import com.vivenotes.ui.icons.SettingsSymbols
 import com.vivenotes.ui.keyboard.isModifier
+import com.vivenotes.ui.keyboard.penKeyLabel
 import com.vivenotes.ui.keyboard.toChord
 import com.vivenotes.ui.theme.LocalDesktopColors
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.PenAction
+import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.ShortcutKey
 
@@ -50,6 +55,11 @@ object ShortcutDialogTags {
     const val ResetAll = "hardware-reset-all-dialog"
     const val ConfirmResetAll = "hardware-reset-all-confirm"
     const val CancelResetAll = "hardware-reset-all-cancel"
+    const val PenKeyCapture = "hardware-pen-key-capture"
+    const val PenKeyCaptured = "hardware-pen-key-captured"
+    const val PenKeyMessage = "hardware-pen-key-message"
+    const val PenKeyReplace = "hardware-pen-key-replace"
+    const val PenKeyCancel = "hardware-pen-key-cancel"
 }
 
 /**
@@ -134,6 +144,94 @@ internal fun ShortcutCaptureDialog(
             if (conflict != null) {
                 Button(onClick = { onSet(held) }, shape = MaterialTheme.shapes.small,
                     modifier = Modifier.testTag(ShortcutDialogTags.Replace)) { Text(Strings.replace) }
+            }
+        },
+    )
+}
+
+/**
+ * Asks for the hardware key [slot] holds, as the shortcut capture asks for its chords: the next
+ * key pressed takes the slot, Esc cancels, and Backspace clears it. A key another slot already
+ * has is held until Replace (or Enter) confirms taking it — the key moves, and what it does moves
+ * with it. [onSet] receives the binding, or null to clear the slot.
+ */
+@Composable
+internal fun PenKeyCaptureDialog(
+    slot: Int,
+    buttons: PenButtonSettings,
+    onSet: (PenKeyBinding?) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var pending by remember(slot) { mutableStateOf<PenKeyBinding?>(null) }
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+    val held = pending
+    val conflict = held?.let { buttons.keyConflict(slot, it.code) }
+    val current = buttons.key(slot)
+
+    DesktopDialogFrame(
+        title = Strings.set_hardware_key,
+        icon = SettingsSymbols.Stylus,
+        onDismiss = onDismiss,
+        maxWidth = 420.dp,
+        modifier = Modifier.testTag(ShortcutDialogTags.PenKeyCapture),
+        content = {
+            Column(
+                modifier = Modifier.fillMaxWidth()
+                    .focusRequester(focus)
+                    .focusable()
+                    // Every key is the answer, so none may reach anything else. Esc never gets
+                    // here: the dialog frame takes it first and cancels. A modifier key is on its
+                    // way to a chord, never a pen's own key.
+                    .onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown || event.key.isModifier()) return@onPreviewKeyEvent true
+                        when {
+                            event.key == Key.Backspace -> onSet(null)
+                            event.key == Key.Enter && conflict != null -> onSet(held)
+                            else -> {
+                                val code = event.key.keyCode
+                                // Key 0 is Compose's "unknown key", which nothing can bind. A key
+                                // keeps doing what it did when it moves slots; a new key on a
+                                // configured row keeps the row's action.
+                                val binding = if (code == 0L) null else PenKeyBinding(code, event.key.penKeyLabel(),
+                                    current?.action ?: buttons.bindingFor(code)?.action ?: PenAction.None)
+                                // A key no other slot has is taken at once, as a chord without a
+                                // conflict is; one another slot has waits for Replace.
+                                if (binding != null) {
+                                    if (buttons.keyConflict(slot, code) == null) onSet(binding) else pending = binding
+                                }
+                            }
+                        }
+                        true
+                    },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(Strings.press_the_new_key_for_value(Strings.pen_hardware_key_value(slot + 1)),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface)
+                Keycap(held?.label ?: "…", large = true,
+                    modifier = Modifier.padding(vertical = 4.dp).testTag(ShortcutDialogTags.PenKeyCaptured))
+                Text(
+                    text = when {
+                        conflict != null -> Strings.value_is_already_captured_for_value(
+                            held?.label ?: "", Strings.pen_hardware_key_value(conflict + 1))
+                        else -> Strings.now_value(current?.label ?: Strings.not_set) +
+                            Strings.esc_cancels_backspace_clears_the_key
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.heightIn(min = 32.dp).testTag(ShortcutDialogTags.PenKeyMessage),
+                )
+            }
+        },
+        actions = {
+            OutlinedButton(onClick = onDismiss, shape = MaterialTheme.shapes.small,
+                modifier = Modifier.testTag(ShortcutDialogTags.PenKeyCancel)) { Text(Strings.cancel) }
+            if (conflict != null) {
+                Button(onClick = { onSet(held) }, shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.testTag(ShortcutDialogTags.PenKeyReplace)) { Text(Strings.replace) }
             }
         },
     )
