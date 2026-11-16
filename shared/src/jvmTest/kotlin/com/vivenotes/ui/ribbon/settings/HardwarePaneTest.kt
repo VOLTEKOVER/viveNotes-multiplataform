@@ -50,8 +50,11 @@ import com.vivenotes.ui.shell.WorkspaceTestTags
 import com.vivenotes.ui.theme.ViveNotesTheme
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.KeyChord
+import com.vivenotes.workspace.LocalPenHaptics
 import com.vivenotes.workspace.PenAction
 import com.vivenotes.workspace.PenButtonSettings
+import com.vivenotes.workspace.PenHapticFeel
+import com.vivenotes.workspace.PenHaptics
 import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.RibbonTab
 import com.vivenotes.workspace.ShortcutAction
@@ -253,6 +256,46 @@ class HardwarePaneTest {
         runOnIdle { assertNull(observed.inkTool) }
     }
 
+    /** The pen's motor is on until its owner turns it off, and the choice is saved at once. */
+    @Test
+    fun thePenSMotorIsOnUntilTurnedOff() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var saved: InputSettings? = null
+        setWorkspace(onInputChange = { saved = it })
+        openHardware()
+        onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick()
+
+        onNodeWithTag(HardwareTags.PenHaptics).performScrollTo().assertIsOn()
+        onNodeWithTag(HardwareTags.PenHaptics).performClick().assertIsOff()
+        runOnIdle { assertEquals(InputSettings(penHaptics = false), saved) }
+
+        onNodeWithTag(HardwareTags.PenHaptics).performClick().assertIsOn()
+        runOnIdle { assertEquals(InputSettings(penHaptics = true), saved) }
+    }
+
+    /**
+     * A pen key that runs a command clicks the pen's own motor, once per press that changes
+     * something: pressing the same pen again while it is already in hand is not a click.
+     */
+    @Test
+    fun aPenCommandClicksThePenSMotor() = runDesktopComposeUiTest(width = 1600, height = 900) {
+        var observed = WorkspaceState.demo()
+        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.Pen2)
+        val haptics = FakePenHaptics()
+        setWorkspace(
+            input = InputSettings(penButtons = PenButtonSettings().withKey(0, printScreen)),
+            penHaptics = haptics,
+        ) { observed = it }
+
+        press(listOf(Key.PrintScreen))
+        runOnIdle {
+            assertEquals(1, observed.activePenIndex)
+            assertEquals(1, haptics.clicks)
+        }
+
+        press(listOf(Key.PrintScreen))
+        runOnIdle { assertEquals(1, haptics.clicks) }
+    }
+
     /** One pane at a time, as on Android: Paper Size and Hardware replace each other. */
     @Test
     fun hardwareAndPaperSizeShareTheDock() = runDesktopComposeUiTest(width = 1600, height = 900) {
@@ -450,6 +493,7 @@ class HardwarePaneTest {
         bindings: KeyBindings = KeyBindings.Default,
         input: InputSettings = InputSettings(),
         clipboard: TextClipboard? = null,
+        penHaptics: PenHaptics? = null,
         onInputChange: (InputSettings) -> Unit = {},
         onStateChange: (WorkspaceState) -> Unit = {},
     ) {
@@ -462,10 +506,19 @@ class HardwarePaneTest {
                     keyBindings = bindings, onKeyBindingsChange = { reported = it })
             }
             ViveNotesTheme(darkTheme = true) {
-                if (clipboard == null) content()
-                else CompositionLocalProvider(LocalTextClipboard provides clipboard) { content() }
+                CompositionLocalProvider(LocalPenHaptics provides penHaptics) {
+                    if (clipboard == null) content()
+                    else CompositionLocalProvider(LocalTextClipboard provides clipboard) { content() }
+                }
             }
         }
+    }
+
+    private class FakePenHaptics : PenHaptics {
+        var clicks = 0
+        override fun inkStart(pointerId: Long, feel: PenHapticFeel) = Unit
+        override fun inkEnd() = Unit
+        override fun commandClick() { clicks++ }
     }
 
     private class FakeClipboard : TextClipboard {

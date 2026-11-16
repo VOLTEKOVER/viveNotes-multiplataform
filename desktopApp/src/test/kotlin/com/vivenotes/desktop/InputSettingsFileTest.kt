@@ -52,6 +52,20 @@ class InputSettingsFileTest {
         }
     }
 
+    /** The pen's motor is on by default, and a file that turned it off keeps it off. */
+    @Test
+    fun thePenSMotorCanBeTurnedOffAndStaysOff() {
+        val directory = Files.createTempDirectory("input-settings").toFile()
+        try {
+            val file = File(directory, "config/input.properties")
+            assertEquals(InputSettings(), InputSettingsFile(file).load())
+            InputSettingsFile(file).save(InputSettings(penHaptics = false))
+            assertEquals(InputSettings(penHaptics = false), InputSettingsFile(file).load())
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     /** Unknown actions and bindings that are not bindings become the fields' defaults. */
     @Test
     fun unreadablePenValuesFallBackToTheirDefaults() {
