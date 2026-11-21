@@ -27,6 +27,8 @@ import com.vivenotes.data.VideoThumbnailSource
 import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.localization.Strings
 import com.vivenotes.search.ContentSearchService
+import com.vivenotes.typst.TypstRenderer
+import com.vivenotes.typst.UnsupportedTypstRenderer
 import com.vivenotes.ui.account.AccountHost
 import com.vivenotes.ui.canvas.primeResizeCursorProviders
 import com.vivenotes.ui.components.LocalPopupLayerDensity
@@ -90,6 +92,7 @@ object WorkspaceTestTags {
     const val ObjectToolkit = "workspace-object-toolkit"
     const val ObjectColor = "workspace-object-color"
     const val ObjectColorDivider = "workspace-object-color-divider"
+    const val ObjectTypstEdit = "workspace-object-typst-edit"
     const val InkGroup = "workspace-ink-group"
     const val InkMath = "workspace-ink-math"
     const val InkColorDivider = "workspace-ink-color-divider"
@@ -155,6 +158,7 @@ fun WorkspaceScreen(
     /** This device's recognition models, for Settings → Models; without them it is unavailable. */
     aiModels: AiModels? = null,
     drawMath: DrawMath? = null,
+    typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     appVersion: String = Strings.development,
     search: ContentSearchService? = null,
     onOpenSearchPage: ((String, String) -> Unit)? = null,
@@ -237,6 +241,7 @@ fun WorkspaceScreen(
                         accountConnected = accountConnected, serverUnreachable = accountUnreachable,
                         onOpenAccount = { accountOpen = true },
                         onAbout = { aboutOpen = true }, aiModels = aiModels, drawMath = drawMath,
+                        typstRenderer = typstRenderer,
                         onExportPdf = { pdfExportOpen = true },
                         search = search, onOpenSearchPage = onOpenSearchPage, shortcutKeys = shortcutKeys,
                         textInput = textInput, developmentBuild = developmentBuild, debugLog = debugLog) }

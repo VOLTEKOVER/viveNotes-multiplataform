@@ -6,11 +6,15 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.vivenotes.ai.AiModels
+import com.vivenotes.data.PictureLibrary
 import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.model.PageStyle
 import com.vivenotes.model.search.ContentHit
 import com.vivenotes.search.ContentSearchService
 import com.vivenotes.search.SearchRequest
+import com.vivenotes.typst.TypstColorBinding
+import com.vivenotes.typst.TypstDiagramSource
+import com.vivenotes.typst.TypstRenderer
 import com.vivenotes.ui.ribbon.draw.*
 import com.vivenotes.ui.ribbon.file.FilePaneContent
 import com.vivenotes.ui.ribbon.settings.HardwarePane
@@ -51,6 +55,14 @@ internal fun WorkspaceDockedPane(
     onSearchHit: (ContentHit) -> Unit,
     searchFocusTick: Int,
     drawMath: DrawMath?,
+    typstSource: String,
+    onTypstSourceChange: (String) -> Unit,
+    typstColors: List<TypstColorBinding>,
+    onTypstColorsChange: (List<TypstColorBinding>) -> Unit,
+    typstRenderer: TypstRenderer,
+    onPlaceTypst: (String, TypstDiagramSource) -> Unit,
+    typstEditing: Boolean = false,
+    pictures: PictureLibrary?,
     inkMath: InkMathRequest?,
     mathSource: String,
     mathAnchor: Rect? = null,
@@ -125,6 +137,19 @@ internal fun WorkspaceDockedPane(
                     log = debugLog, onPlaceGraph = place, onClose = onCloseInkMath)
             }
             DockedPane.Models -> ModelsPane(aiModels, onClose = onClosePane)
+            DockedPane.Typst -> TypstPane(
+                source = typstSource,
+                onSourceChange = onTypstSourceChange,
+                colors = typstColors,
+                onColorsChange = onTypstColorsChange,
+                renderer = typstRenderer,
+                pictures = pictures,
+                enabled = state.selectedPage?.editable == true,
+                onPlace = onPlaceTypst,
+                onClose = onClosePane,
+                editing = typstEditing,
+                startInEditMode = typstEditing,
+            )
         }
     }
 }

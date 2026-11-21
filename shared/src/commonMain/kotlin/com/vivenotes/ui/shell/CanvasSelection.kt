@@ -209,6 +209,8 @@ internal fun CanvasObjectToolkit(
     onGraphEquation: (Outline.Equation) -> Unit = {},
     /** Opens an equation in the Math pane. Null where there is no pane to open, and no button. */
     onOpenEquationInMath: ((Outline.Equation) -> Unit)? = null,
+    /** Opens a CeTZ diagram in the side panel. Null for pictures that do not carry Typst source. */
+    onOpenTypstImage: ((Outline.Image) -> Unit)? = null,
     onGroupSelection: () -> Unit = {},
     groupingEnabled: Boolean = true,
     curveVertexMode: CurveVertexMode? = null,
@@ -296,6 +298,14 @@ internal fun CanvasObjectToolkit(
                     }
                     state.selectedImages.takeIf { it.isNotEmpty() }?.let { images ->
                         PictureObjectTools(images.map { it.backgroundArgb }.distinct().singleOrNull(), onImageBackground)
+                        if (images.size == 1) onOpenTypstImage?.let { open ->
+                            TooltipIconButton(Strings.typst_edit, onClick = { open(images.single()) },
+                                tooltipPosition = TooltipAnchorPosition.Above,
+                                modifier = Modifier.size(32.dp).testTag(WorkspaceTestTags.ObjectTypstEdit)) {
+                                Icon(ObjectSymbols.EditSquare, contentDescription = null,
+                                    modifier = Modifier.size(18.dp))
+                            }
+                        }
                     }
                     TooltipIconButton(Strings.delete_selection, onClick = onDeleteObjects, tooltipPosition = TooltipAnchorPosition.Above,
                         modifier = Modifier.size(32.dp).testTag(WorkspaceTestTags.ObjectDelete)) {

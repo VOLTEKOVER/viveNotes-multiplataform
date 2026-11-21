@@ -27,6 +27,8 @@ import com.vivenotes.data.NotebookFiles
 import com.vivenotes.data.PictureLibrary
 import com.vivenotes.data.VideoThumbnailSource
 import com.vivenotes.diagnostics.DebugLog
+import com.vivenotes.typst.TypstRenderer
+import com.vivenotes.typst.UnsupportedTypstRenderer
 import com.vivenotes.ui.canvas.LocalClipboardHtml
 import com.vivenotes.ui.shell.WorkspaceScreen
 import com.vivenotes.ui.account.AccountHost
@@ -79,6 +81,8 @@ fun App(
     /** The platform's recognition models, for Settings → Models. */
     aiModels: AiModels? = null,
     drawMath: com.vivenotes.ui.ribbon.draw.DrawMath? = null,
+    /** Compiles pasted Typst/CeTZ diagrams; without one the Draw panel is not offered. */
+    typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     appVersion: String = Strings.development,
     search: com.vivenotes.search.ContentSearchService? = null,
     debugLog: DebugLog = remember { DebugLog() },
@@ -125,6 +129,7 @@ fun App(
                     inputSettings = inputSettings, onInputSettingsChange = onInputSettingsChange,
                     fileActions = fileActions,
                     accountHost = accountHost, aiModels = aiModels, drawMath = drawMath,
+                    typstRenderer = typstRenderer,
                     appVersion = appVersion, search = search, onOpenSearchPage = session::openSearchPage,
                     debugLog = debugLog, developmentBuild = developmentBuild, onDarkThemeChange = onDarkThemeChange,
                     updates = updates)

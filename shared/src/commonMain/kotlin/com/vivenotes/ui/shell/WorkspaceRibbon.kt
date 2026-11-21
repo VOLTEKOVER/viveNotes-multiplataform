@@ -53,6 +53,7 @@ internal fun WorkspaceRibbon(
     onInterface: () -> Unit,
     openPane: DockedPane?,
     togglePane: (DockedPane) -> Unit,
+    typstAvailable: Boolean = false,
     onViewChange: (ViewSettings) -> Unit,
     onAbout: () -> Unit,
     aiModels: AiModels?,
@@ -66,7 +67,9 @@ internal fun WorkspaceRibbon(
             onImportFile = onImportFile)
         RibbonTab.Draw -> DrawRibbon(state, onStateChange, onShapeSettingsChange, onInkSettingsChange,
             state.selectedPage?.let { if (canvasPalette(it.document.style, canvasDark).background.luminance() < .45f) Color.White else Color.Black } ?: Color.Black,
-            calculatorAvailable = formulaReady, calculatorOpen = calculatorOpen, onToggleCalculator = { onToggleCalculator() })
+            calculatorAvailable = formulaReady, calculatorOpen = calculatorOpen, onToggleCalculator = { onToggleCalculator() },
+            typstAvailable = typstAvailable, typstOpen = openPane == DockedPane.Typst,
+            onToggleTypst = { togglePane(DockedPane.Typst) })
         RibbonTab.Document -> DocumentTab(state, onStateChange, applyEditorCommand, pictures,
             { canvasOrigin.read() }, documentColorSelection, onLinkRequest = onLinkRequest,
             onEditorDefaultsChange = onEditorDefaultsChange, onPictureDialog = onPictureDialog,

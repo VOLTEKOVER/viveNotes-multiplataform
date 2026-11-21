@@ -52,6 +52,12 @@ import com.vivenotes.model.search.ContentKind
 import com.vivenotes.richtext.TextSelection
 import com.vivenotes.search.ContentSearchService
 import com.vivenotes.search.revealSearchHit
+import com.vivenotes.typst.SampleTypstSource
+import com.vivenotes.typst.TypstColorBinding
+import com.vivenotes.typst.TypstDiagramSource
+import com.vivenotes.typst.TypstDiagramSourceCodec
+import com.vivenotes.typst.TypstRenderer
+import com.vivenotes.typst.UnsupportedTypstRenderer
 import com.vivenotes.ui.canvas.LocalClipboardHtml
 import com.vivenotes.ui.canvas.TextClipboardActions
 import com.vivenotes.ui.components.ToolPaneWidth
@@ -119,6 +125,7 @@ internal fun WorkspaceContent(
     onExportPdf: () -> Unit,
     aiModels: AiModels?,
     drawMath: DrawMath?,
+    typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     developmentBuild: Boolean,
     debugLog: DebugLog,
     search: ContentSearchService?,
@@ -134,6 +141,8 @@ internal fun WorkspaceContent(
     val importRequests = remember { com.vivenotes.ui.ribbon.file.ImportFileRequests() }
     val importScope = rememberCoroutineScope()
     var openPane by remember { mutableStateOf<DockedPane?>(null) }
+    /** Set only while the panel is editing an already placed diagram. */
+    var typstEditTarget by remember { mutableStateOf<TypstEditTarget?>(null) }
     var searchQuery by remember { mutableStateOf("") }
     var searchImageHighlight by remember { mutableStateOf<com.vivenotes.model.ocr.PictureHighlight?>(null) }
     val searchScope = rememberCoroutineScope()
@@ -164,6 +173,7 @@ internal fun WorkspaceContent(
     var notebookConfirmation by remember { mutableStateOf<String?>(null) }
     var confirmRevision by remember { mutableStateOf(false) }
     fun togglePane(pane: DockedPane) {
+        if (openPane == pane && pane == DockedPane.Typst) typstEditTarget = null
         openPane = if (openPane == pane) null else pane
     }
     var editingShortcut by remember { mutableStateOf<ShortcutAction?>(null) }
@@ -183,6 +193,63 @@ internal fun WorkspaceContent(
     var tabTextSelection by remember { mutableStateOf<Pair<String, TextSelection>?>(null) }
     var calculatorOpen by remember { mutableStateOf(false) }
     var mathSource by remember { mutableStateOf("") }
+    /** The CeTZ panel keeps its source and colour bindings while it is closed and reopened. */
+    var typstSource by remember { mutableStateOf(SampleTypstSource) }
+    var typstColors by remember { mutableStateOf(TypstDiagramSourceCodec.bindings(SampleTypstSource)) }
+    val typstScope = rememberCoroutineScope()
+    /** Only a single selected picture whose attachment carries Typst source gets the toolkit's Edit. */
+    var typstEditImage by remember { mutableStateOf<Outline.Image?>(null) }
+    val typstImageCandidate = state.selectedImages.singleOrNull()
+    LaunchedEffect(typstImageCandidate?.id, typstImageCandidate?.attachmentId, state.selectedPageId,
+        pictures, typstRenderer) {
+        typstEditImage = null
+        val image = typstImageCandidate ?: return@LaunchedEffect
+        if (pictures == null || typstRenderer is UnsupportedTypstRenderer) return@LaunchedEffect
+        val bytes = pictures.bytes(image.attachmentId) ?: return@LaunchedEffect
+        if (runCatching { TypstDiagramSourceCodec.read(bytes.decodeToString()) }.getOrNull() != null) {
+            typstEditImage = image
+        }
+    }
+    fun onTypstSource(source: String) {
+        typstSource = source
+        typstColors = TypstDiagramSourceCodec.bindings(source, typstColors)
+    }
+    fun openTypstImage(image: Outline.Image) {
+        val pageId = state.selectedPageId
+        typstScope.launch {
+            val bytes = pictures?.bytes(image.attachmentId) ?: return@launch
+            val diagram = runCatching { TypstDiagramSourceCodec.read(bytes.decodeToString()) }.getOrNull()
+                ?: return@launch
+            typstSource = diagram.source
+            typstColors = TypstDiagramSourceCodec.bindings(diagram.source, diagram.colors)
+            typstEditTarget = TypstEditTarget(pageId, image.id)
+            openPane = DockedPane.Typst
+            debugLog.event("typst") { "diagram opened for editing" }
+        }
+    }
+    fun placeTypst(svg: String, diagram: TypstDiagramSource) {
+        val library = pictures ?: return
+        val pageId = state.selectedPageId
+        val origin = canvasOrigin.read()
+        val target = typstEditTarget
+        typstScope.launch {
+            val imported = library.import(svg.toByteArray()) ?: return@launch
+            onStateChange { current ->
+                when {
+                    target != null && current.selectedPageId == target.pageId ->
+                        current.replaceImageAttachment(target.pageId, target.outlineId, imported)
+                    target == null && current.selectedPageId == pageId ->
+                        current.insertPicture(pageId, imported, origin.x, origin.y, select = true)
+                    else -> current
+                }
+            }
+            debugLog.event("typst") {
+                "${if (target == null) "diagram placed" else "diagram replaced"}; colors=${diagram.colors.count { it.used }}"
+            }
+            typstEditTarget = null
+            openPane = null
+        }
+    }
     /** Where a graph placed from a typed formula lands below: the equation it was opened from. */
     var mathAnchor by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var inkMath by remember { mutableStateOf<InkMathRequest?>(null) }
@@ -355,6 +422,7 @@ internal fun WorkspaceContent(
                 onInterface = onInterface,
                 openPane = openPane,
                 togglePane = ::togglePane,
+                typstAvailable = pictures != null && typstRenderer !is UnsupportedTypstRenderer,
                 onViewChange = onViewChange,
                 onAbout = onAbout,
                 aiModels = aiModels
@@ -378,7 +446,7 @@ internal fun WorkspaceContent(
                 val paneMotion = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
                 val dockedWidth = when {
                     state.filePane.docked && fileActions != null -> ToolPaneWidth + 1.dp
-                    openPane == DockedPane.Math -> MathPaneWidth + 1.dp
+                    openPane == DockedPane.Math || openPane == DockedPane.Typst -> MathPaneWidth + 1.dp
                     openPane != null -> ToolPaneWidth + 1.dp
                     else -> 0.dp
                 }
@@ -452,6 +520,7 @@ internal fun WorkspaceContent(
                                 openPane = DockedPane.Math
                                 debugLog.event("math") { "equation opened in pane" }
                             },
+                            onOpenTypstImage = typstEditImage?.let { image -> { openTypstImage(image) } },
                         )
                     }
                     WorkspaceDockedPane(
@@ -460,7 +529,7 @@ internal fun WorkspaceContent(
                         fileActions = fileActions,
                         openPane = openPane,
                         onRestoreRevision = { confirmRevision = true },
-                        onClosePane = { openPane = null },
+                        onClosePane = { openPane = null; typstEditTarget = null },
                         viewActions = viewActions,
                         onEditorDefaultsChange = onEditorDefaultsChange,
                         input = input,
@@ -487,6 +556,14 @@ internal fun WorkspaceContent(
                         },
                         searchFocusTick = searchFocusTick,
                         drawMath = drawMath,
+                        typstSource = typstSource,
+                        onTypstSourceChange = ::onTypstSource,
+                        typstColors = typstColors,
+                        onTypstColorsChange = { typstColors = it },
+                        typstRenderer = typstRenderer,
+                        onPlaceTypst = ::placeTypst,
+                        typstEditing = typstEditTarget != null,
+                        pictures = pictures,
                         inkMath = inkMath,
                         mathSource = mathSource,
                         mathAnchor = mathAnchor,
@@ -561,4 +638,7 @@ internal fun WorkspaceContent(
 }
 
 
-internal enum class DockedPane { PaperSize, Hardware, Models, Search, Math }
+internal enum class DockedPane { PaperSize, Hardware, Models, Search, Math, Typst }
+
+/** The diagram a panel session will replace when its Apply button is pressed. */
+private data class TypstEditTarget(val pageId: String, val outlineId: String)

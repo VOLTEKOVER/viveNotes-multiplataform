@@ -2,6 +2,9 @@ package com.vivenotes.data
 
 import com.vivenotes.data.AttachmentStore.Companion.sha256
 import com.vivenotes.data.db.NotesDatabase
+import com.vivenotes.typst.TypstColorBinding
+import com.vivenotes.typst.TypstDiagramSource
+import com.vivenotes.typst.TypstDiagramSourceCodec
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -62,6 +65,31 @@ class AttachmentStoreTest {
             assertEquals(160 to 80, image.width to image.height)
         }
         assertContentEquals(source, store.bytes(first.attachmentId))
+    }
+
+    @Test
+    fun typstSvgImportsKeepTheirEditableSourceAndRemainVector() = runBlocking {
+        val diagram = TypstDiagramSource("#cetz.canvas({})",
+            listOf(TypstColorBinding("red", 0xFFFF4136.toInt(), used = true)))
+        val svg = TypstDiagramSourceCodec.embed(
+            """<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/></svg>""",
+            diagram,
+        )
+
+        val imported = assertNotNull(store.import(svg.encodeToByteArray()))
+
+        val stored = assertNotNull(store.bytes(imported.attachmentId))
+        assertEquals(diagram, TypstDiagramSourceCodec.read(stored.decodeToString()))
+        val row = assertNotNull(db.attachmentDao().byId(imported.attachmentId))
+        assertEquals("image/svg+xml", row.mimeType)
+        assertNotNull(store.loadSvg(imported.attachmentId)).use { vector ->
+            Surface.makeRasterN32Premul(80, 40).use { surface ->
+                vector.draw(surface.canvas, 0f, 0f, 80f, 40f)
+                Bitmap.makeFromImage(surface.makeImageSnapshot()).use {
+                    assertEquals(Color.RED, it.getColor(40, 20))
+                }
+            }
+        }
     }
 
     @Test

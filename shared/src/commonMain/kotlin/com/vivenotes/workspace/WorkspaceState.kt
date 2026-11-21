@@ -1276,8 +1276,9 @@ data class WorkspaceState(
      * the next click reaches the picture. [pageId] is the page the picture was chosen for: the
      * choice takes a while, and a picture must not land on a page opened meanwhile.
      */
-    fun insertPicture(pageId: String, picture: ImportedPicture, viewLeft: Float, viewTop: Float): WorkspaceState =
-        placePictures(pageId, listOf(picture), viewLeft + PICTURE_INSERT_MARGIN, viewTop + PICTURE_INSERT_MARGIN)
+    fun insertPicture(pageId: String, picture: ImportedPicture, viewLeft: Float, viewTop: Float,
+                      select: Boolean = false): WorkspaceState =
+        placePictures(pageId, listOf(picture), viewLeft + PICTURE_INSERT_MARGIN, viewTop + PICTURE_INSERT_MARGIN, select)
 
     /**
      * Pictures dropped on page [pageId]: the first with its top left corner at ([x], [y]), each
@@ -1288,7 +1289,8 @@ data class WorkspaceState(
     fun dropPictures(pageId: String, pictures: List<ImportedPicture>, x: Float, y: Float): WorkspaceState =
         placePictures(pageId, pictures, x, y)
 
-    private fun placePictures(pageId: String, pictures: List<ImportedPicture>, x: Float, y: Float): WorkspaceState {
+    private fun placePictures(pageId: String, pictures: List<ImportedPicture>, x: Float, y: Float,
+                              select: Boolean = false): WorkspaceState {
         val page = editablePage?.takeIf { it.id == pageId } ?: return this
         if (pictures.isEmpty()) return this
         val width = Outline.Image.DEFAULT_WIDTH
@@ -1304,7 +1306,10 @@ data class WorkspaceState(
                 attachmentId = picture.attachmentId,
             ).also { top += it.height + PICTURE_INSERT_MARGIN }
         }
-        return editOutlines { it + images }.copy(textToolArmed = false, objectLassoArmed = false)
+        val placed = editOutlines { it + images }.copy(textToolArmed = false, objectLassoArmed = false)
+        // A diagram opened from the CeTZ panel is held at once, so its quick toolkit — with Edit —
+        // is there as soon as the picture lands. Ordinary picture inserts keep the old behaviour.
+        return if (select && images.size == 1) placed.selectObject(images.single().id) else placed
     }
 
     /** Android `CanvasSelection.isImageOnly`: the selected pictures, when nothing else is selected. */
@@ -1312,6 +1317,28 @@ data class WorkspaceState(
         if (selectedInk != null || selectedTextOutlineIds.isNotEmpty() ||
             selectedPrimeObjects.any { it !is Outline.Image }) emptyList()
         else selectedPrimeObjects.filterIsInstance<Outline.Image>()
+
+    /**
+     * Swaps the stored bytes of one picture — the CeTZ panel replacing the diagram it was opened
+     * from. Its id, position and frame width stay; the height follows the new SVG's aspect ratio.
+     * The change is one undo step, like changing the picture's background.
+     */
+    fun replaceImageAttachment(pageId: String, outlineId: String, picture: ImportedPicture): WorkspaceState {
+        val page = editablePage?.takeIf { it.id == pageId } ?: return this
+        if (page.document.outlines.none { it is Outline.Image && it.id == outlineId }) return this
+        return editOutlines { outlines ->
+            outlines.map { outline ->
+                if (outline !is Outline.Image || outline.id != outlineId) outline
+                else {
+                    val aspect = if (picture.pixelWidth > 0)
+                        picture.pixelHeight.toFloat() / picture.pixelWidth
+                    else outline.height / outline.width.coerceAtLeast(1f)
+                    outline.copy(attachmentId = picture.attachmentId,
+                        height = (outline.width * aspect).coerceAtLeast(Outline.Image.MIN_SIZE))
+                }
+            }
+        }
+    }
 
     /**
      * Android's `setImageBackground`. Null is no background, not a transparent one — the value

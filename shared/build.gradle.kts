@@ -83,6 +83,20 @@ plugins {
     alias(libs.plugins.room)
 }
 
+// Only the native Typst binary for the build host is needed at runtime. Override with
+// -PtypstNativeClassifier=... when cross-building a desktop package.
+val typstNativeClassifier = providers.gradleProperty("typstNativeClassifier").orNull ?: run {
+    val os = System.getProperty("os.name").lowercase()
+    val arch = System.getProperty("os.arch").lowercase()
+    val platform = when {
+        os.contains("linux") -> "linux"
+        os.contains("windows") -> "windows"
+        else -> "macos"
+    }
+    val cpu = if (arch == "aarch64" || arch == "arm64") "aarch64" else "x86_64"
+    "$platform-$cpu"
+}
+
 val generateAppStrings = tasks.register<GenerateAppStrings>("generateAppStrings") {
     stringsFile.set(layout.projectDirectory.file("src/commonMain/composeResources/values/strings.xml"))
     outputDirectory.set(layout.buildDirectory.dir("generated/appStrings"))
@@ -203,6 +217,11 @@ kotlin {
         jvmMain.dependencies {
             // Skiko supplies the Android renderer's vector canvas; FOP writes those paths to PDF.
             implementation("org.apache.xmlgraphics:fop-core:2.12")
+            // Offline Typst engine for the Draw tab's CeTZ diagram panel. Native binaries are
+            // classified per platform; CeTZ itself is bundled under jvmMain/resources.
+            implementation("io.github.phfneves:typst-kmp:0.1.0-alpha03")
+            implementation("io.github.phfneves:typst-kmp-jvm:0.1.0-alpha03")
+            runtimeOnly("io.github.phfneves:typst-kmp-jvm:0.1.0-alpha03:$typstNativeClassifier")
             implementation("com.vivenotes.byteink:byteink-compose:$byteinkVersion")
             implementation("com.vivenotes.byteink:byteink-kit:$byteinkVersion")
             implementation(libs.androidx.room.runtime)

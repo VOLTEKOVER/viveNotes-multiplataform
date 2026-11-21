@@ -11,6 +11,7 @@ import com.vivenotes.desktop.rendering.WaylandRendering
 import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.data.NotebookFiles
 import com.vivenotes.data.PictureLibrary
+import com.vivenotes.typst.JvmTypstRenderer
 import com.vivenotes.workspace.WorkspaceState
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +33,7 @@ internal fun launchWayland(notes: DesktopNotes, profile: DesktopProfile, log: De
     WaylandRendering.prepare()
     DesktopTouch.startWayland(log)
     notes.start()
+    val typstRenderer = JvmTypstRenderer()
     val monitor = primaryMonitorArea()
     val initialSize = initialWindowSize(monitor)
 
@@ -55,7 +57,7 @@ internal fun launchWayland(notes: DesktopNotes, profile: DesktopProfile, log: De
             monitor.workArea.y + (monitor.workArea.height - initialSize.height) / 2)
         frame.contentPane.add(createWaylandContent(notes, notes.pictures(frame), notes.notebookFiles(frame),
             notes.pdfExporter(frame), notes.fileImporter(frame), log, profile, onDarkThemeChange = { titleBar.dark = it },
-            updates = updates))
+            updates = updates, typstRenderer = typstRenderer))
         frame.isVisible = true
         updates?.start()
         DesktopTouch.attachPointers(frame, log)
@@ -76,7 +78,7 @@ private fun createWaylandContent(notes: DesktopNotes, pictures: PictureLibrary, 
                                  pdfExporter: com.vivenotes.pdf.PdfExportService,
                                  fileImporter: com.vivenotes.fileimport.FileImportService, log: DebugLog,
                                  profile: DesktopProfile, onDarkThemeChange: (Boolean) -> Unit,
-                                 updates: DesktopUpdates?): PopupLayerHost {
+                                 updates: DesktopUpdates?, typstRenderer: JvmTypstRenderer): PopupLayerHost {
     val panel = waylandComposePanel(log)
     val host = PopupLayerHost(panel, log)
     panel.windowContainer = host
@@ -102,6 +104,7 @@ private fun createWaylandContent(notes: DesktopNotes, pictures: PictureLibrary, 
             onShapeSettingsChange = notes::updateShapeSettings, onInkSettingsChange = notes::updateInkSettings,
             accountHost = notes.sync?.accountHost,
             aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
+            typstRenderer = typstRenderer,
             appVersion = DesktopBuildInfo.version, debugLog = log, developmentBuild = profile.developmentBuild,
             clipboardHtml = notes.clipboardHtml, onDarkThemeChange = onDarkThemeChange, updates = updates)
     }

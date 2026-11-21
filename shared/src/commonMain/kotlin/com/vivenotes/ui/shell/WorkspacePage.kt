@@ -86,6 +86,8 @@ internal fun WorkspacePage(
     onEditGraphSliders: (String) -> Unit = {},
     /** The equation toolkit's Math: the formula in the Math pane. Null where there is no pane. */
     onOpenEquationInMath: ((com.vivenotes.model.Outline.Equation) -> Unit)? = null,
+    /** The picture toolkit's Edit for a CeTZ diagram. Null for pictures with no editable source. */
+    onOpenTypstImage: ((com.vivenotes.model.Outline.Image) -> Unit)? = null,
 ) {
     val latestState by rememberUpdatedState(state)
     val latestOnStateChange by rememberUpdatedState(onStateChange)
@@ -260,6 +262,7 @@ internal fun WorkspacePage(
         graphableFormulas = equationGraphs ?: GraphableFormulas.None,
         onGraphEquation = { equation -> equationGraphs?.graph(equation) },
         onOpenEquationInMath = onOpenEquationInMath.takeIf { drawMath != null },
+        onOpenTypstImage = onOpenTypstImage,
         onEquationChange = { equation -> onStateChange { it.updateSelectedEquation(equation.latex, equation.width, equation.height) } },
         onImageBackground = { argb -> onStateChange { it.setSelectedImageBackground(argb) } },
         onSelectObjectsInLasso = { path, heights ->

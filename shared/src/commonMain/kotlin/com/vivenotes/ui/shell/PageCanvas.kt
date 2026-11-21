@@ -232,6 +232,7 @@ internal fun PageCanvas(
     graphableFormulas: GraphableFormulas = GraphableFormulas.None,
     onGraphEquation: (Outline.Equation) -> Unit = {},
     onOpenEquationInMath: ((Outline.Equation) -> Unit)? = null,
+    onOpenTypstImage: ((Outline.Image) -> Unit)? = null,
     onEquationChange: (com.vivenotes.workspace.PendingDrawEquation) -> Unit = {},
     onImageBackground: (Int?) -> Unit = {},
     onToggleTodo: (outlineId: String, blockId: String) -> Unit,
@@ -1046,6 +1047,7 @@ internal fun PageCanvas(
                         graphableFormulas = graphableFormulas,
                         onGraphEquation = onGraphEquation,
                         onOpenEquationInMath = onOpenEquationInMath,
+                        onOpenTypstImage = onOpenTypstImage,
                         onShapeLineType = onShapeLineType,
                         onShapeWidth = onShapeWidth,
                         onShapeFill = onShapeFill,
@@ -1085,6 +1087,7 @@ internal fun PageCanvas(
                 onColorObjects = onColorObjects, onTableEdit = onTableEdit, onReleaseTable = {},
                 onEquationChange = onEquationChange, onShapeLineType = onShapeLineType,
                 onShapeWidth = onShapeWidth, onShapeFill = onShapeFill, onImageBackground = onImageBackground,
+                onOpenTypstImage = onOpenTypstImage,
                 onCopyObjects = onCopyObjects, onToggleObjectLock = onToggleObjectLock, onDeleteObjects = onDeleteObjects,
                 curveVertexMode = interaction.curveVertexEdit?.mode,
                 onCurveVertexMode = { mode ->

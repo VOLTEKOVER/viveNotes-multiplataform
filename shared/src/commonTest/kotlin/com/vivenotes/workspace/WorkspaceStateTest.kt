@@ -457,6 +457,32 @@ class WorkspaceStateTest {
     }
 
     @Test
+    fun typstPictureInsertionSelectsItAndReplacementKeepsItsIdentity() {
+        val base = WorkspaceState.demo()
+        val pageId = base.selectedPageId
+        val first = ImportedPicture("old-svg", 320, 180)
+        val second = ImportedPicture("new-svg", 320, 240)
+        val inserted = base.insertPicture(pageId, first, 40f, 60f, select = true)
+        val image = inserted.selectedImages.single()
+        assertEquals(setOf(image.id), inserted.selectedObjectIds)
+        assertTrue(image.height > 0f)
+
+        val replaced = inserted.replaceImageAttachment(pageId, image.id, second)
+        val changed = replaced.selectedImages.single()
+        assertEquals(image.id, changed.id)
+        assertEquals(image.x, changed.x)
+        assertEquals(image.y, changed.y)
+        assertEquals("new-svg", changed.attachmentId)
+        assertTrue(changed.height > image.height)
+        assertEquals(changed.width * 240f / 320f, changed.height, 0.01f)
+
+        val undone = replaced.undoStructure()
+        val restored = undone.selectedPage!!.document.outlines
+            .filterIsInstance<Outline.Image>().single { it.id == image.id }
+        assertEquals("old-svg", restored.attachmentId)
+    }
+
+    @Test
     fun primeLockWideningLassoAndClipboard() {
         val initial = WorkspaceState.demo()
         val page = initial.selectedPage!!

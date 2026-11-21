@@ -24,6 +24,7 @@ import com.vivenotes.ui.components.HoverTooltip
 import com.vivenotes.ui.components.ScaledDropdownMenu
 import com.vivenotes.ui.icons.DocumentSymbols
 import com.vivenotes.ui.icons.DrawSymbols
+import com.vivenotes.ui.icons.GraphSymbols
 import com.vivenotes.ui.ribbon.*
 import com.vivenotes.workspace.*
 
@@ -40,6 +41,7 @@ object DrawRibbonTags {
     const val EraserModePicker = "workspace-eraser-mode"
     fun eraserMode(mode: EraserMode) = "workspace-eraser-mode-${mode.name}"
     const val ObjectLasso = "workspace-object-lasso"
+    const val TypstTool = "draw-typst-tool"
     const val ShapeKit = "draw-shape-kit"
     const val RulerTool = "draw-ruler-tool"
     const val RulerKit = "draw-ruler-kit"
@@ -55,6 +57,9 @@ internal fun DrawRibbon(
     calculatorAvailable: Boolean = false,
     calculatorOpen: Boolean = false,
     onToggleCalculator: () -> Unit = {},
+    typstAvailable: Boolean = false,
+    typstOpen: Boolean = false,
+    onToggleTypst: () -> Unit = {},
 ) {
     var kit by remember(state.selectedPageId) { mutableStateOf<String?>(null) }
     val enabled = state.selectedPage?.let { it.editable && it.inkReady } == true &&
@@ -124,6 +129,8 @@ internal fun DrawRibbon(
                 EquationKit { equation -> kit = null; onStateChange { it.armEquation(equation) } }
             }
         }
+        if (typstAvailable) RibbonIcon(GraphSymbols.AddChart, Strings.typst_diagram, typstOpen,
+            enabled, DrawRibbonTags.TypstTool, onClick = { kit = null; onToggleTypst() })
         SplitTool(Strings.ruler, DrawSymbols.Ruler, state.rulerVisible, enabled, DrawRibbonTags.RulerTool, DrawRibbonTags.RulerKit,
             onClick = { kit = null; onStateChange { it.toggleRuler() } },
             onKit = { onStateChange { it.copy(rulerVisible = true) }; kit = DrawRibbonTags.RulerKit }) {
