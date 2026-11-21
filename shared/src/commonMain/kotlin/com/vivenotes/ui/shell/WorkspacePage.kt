@@ -34,7 +34,10 @@ import com.vivenotes.ui.ribbon.draw.GraphableFormulas
 import com.vivenotes.ui.ribbon.draw.DrawMath
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.ViewSettings
+import com.vivenotes.workspace.ObjectCommand
 import com.vivenotes.workspace.WorkspaceState
+import com.vivenotes.workspace.applyPreparedSelectionGrouping
+import com.vivenotes.workspace.runObjectCommand
 import com.vivenotes.workspace.applyPreparedInkGeometry
 import com.vivenotes.ui.canvas.LocalInkGeometryPublisher
 import com.vivenotes.ui.canvas.LocalClipboardHtml
@@ -156,14 +159,18 @@ internal fun WorkspacePage(
         modifier = modifier,
         onTitleChange = { title -> onStateChange { it.updateSelectedPage(title = title) } },
         onFocusTextBox = { id ->
-            onStateChange { it.focusTextBox(id) }
-            requestEditorFocus()
+            onStateChange { current ->
+                if (!current.textToolArmed && current.selectedPage?.document?.outlines?.any { it.id == id && it.groupId != null } == true)
+                    current.selectObject(id) else current.focusTextBox(id)
+            }
+            if (!state.textToolArmed && state.selectedPage?.document?.outlines?.any { it.id == id && it.groupId != null } == true)
+                canvasFocusRequester.requestFocus() else requestEditorFocus()
         },
         onClearCanvasFocus = { onStateChange { it.clearCanvasFocus() } },
         onInkEdit = { edit, rendered -> onStateChange { it.applyInkEdit(edit, rendered) } },
         onSelectInk = { selection -> onStateChange { it.selectInk(selection) } },
         onInkSelectionChange = { change -> onStateChange { it.applyInkSelectionChange(change) } },
-        onInkGrouping = { change -> onStateChange { it.applyInkGrouping(change) } },
+        onSelectionGrouping = { before, prepared -> onStateChange { it.applyPreparedSelectionGrouping(before, prepared) } },
         inkMathAvailable = formulaReady,
         onInkMath = onInkMath,
         onInkRecolor = { source, argb, followsTheme, change -> onStateChange { current ->
@@ -208,6 +215,12 @@ internal fun WorkspacePage(
             (clipboardHtml as? CanvasClipboardSource)?.markInternalCopy()
         },
         onDeleteObjects = { onStateChange { it.deleteSelectedObjects() } },
+        onObjectCommand = { command, objectId ->
+            debugLog.event("objects") { "menu ${command.name.lowercase()}" + if (objectId != null) " table" else "" }
+            onStateChange { it.runObjectCommand(command, objectId) }
+            // As the toolkit's Copy and Ctrl+X do: the system clipboard says the objects are ours now.
+            if (command != ObjectCommand.Delete) (clipboardHtml as? CanvasClipboardSource)?.markInternalCopy()
+        },
         onToggleObjectLock = { onStateChange { it.toggleObjectLock() } },
         onColorObjects = { argb, followsTheme -> onStateChange { it.colorSelectedObjects(argb, followsTheme) } },
         onShapeLineType = { type -> onStateChange { it.setSelectedShapeLineType(type) } },
@@ -215,6 +228,18 @@ internal fun WorkspacePage(
         onShapeFill = { argb -> onStateChange { it.setSelectedShapeFill(argb) } },
         onMoveShapeEnd = { id, atEnd, x, y, history ->
             onStateChange { it.moveShapeEnd(id, atEnd, x, y, history) }
+        },
+        onMoveShapeVertex = { id, index, x, y, history ->
+            onStateChange { it.moveShapeVertex(id, index, x, y, history) }
+            if (history) debugLog.event("shapes") { "curve vertex moved" }
+        },
+        onAddShapeVertex = { id, segmentId ->
+            onStateChange { it.addShapeVertex(id, segmentId) }
+            debugLog.event("shapes") { "curve vertex added" }
+        },
+        onRemoveShapeVertex = { id, segmentId, atEnd ->
+            onStateChange { it.removeShapeVertex(id, segmentId, atEnd) }
+            debugLog.event("shapes") { "curve vertex removed" }
         },
         onMoveShapeArm = { id, arm, along, history ->
             onStateChange { it.moveShapeArm(id, arm, along, history) }
@@ -263,9 +288,12 @@ internal fun WorkspacePage(
         },
         onEditTextAt = { id, selection ->
             onStateChange { current ->
-                (if (current.focusedTextOutlineId == id) current else current.focusTextBox(id)).selectText(selection)
+                if (!current.textToolArmed && current.selectedPage?.document?.outlines?.any { it.id == id && it.groupId != null } == true)
+                    current.selectObject(id)
+                else (if (current.focusedTextOutlineId == id) current else current.focusTextBox(id)).selectText(selection)
             }
-            requestEditorFocus()
+            if (!state.textToolArmed && state.selectedPage?.document?.outlines?.any { it.id == id && it.groupId != null } == true)
+                canvasFocusRequester.requestFocus() else requestEditorFocus()
         },
         onBodyChange = { id, value ->
             onStateChange { current ->

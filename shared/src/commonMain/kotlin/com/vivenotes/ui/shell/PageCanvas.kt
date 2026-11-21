@@ -78,6 +78,12 @@ import com.vivenotes.model.ink.LineType
 import com.vivenotes.model.ink.Ruler
 import com.vivenotes.model.ink.RulerPoint
 import com.vivenotes.model.ink.ShapeArm
+import com.vivenotes.model.ink.ShapeKind
+import com.vivenotes.model.ink.vertexNear
+import com.vivenotes.ui.canvas.CurveVertexMode
+import com.vivenotes.ui.canvas.CurveVertexEdit
+import com.vivenotes.ui.canvas.CurveVertexHandles
+import com.vivenotes.ui.canvas.CurveVertexInsertionOverlay
 import com.vivenotes.model.ink.StraightLine
 import com.vivenotes.model.search.ContentHit
 import com.vivenotes.model.search.ContentKind
@@ -88,12 +94,15 @@ import com.vivenotes.ui.canvas.CanvasCursor
 import com.vivenotes.ui.canvas.CanvasPointer
 import com.vivenotes.ui.canvas.CanvasTouchActions
 import com.vivenotes.ui.canvas.FingerRole
+import com.vivenotes.ui.canvas.TouchpadPinch
+import com.vivenotes.ui.canvas.touchpadPinch
 import com.vivenotes.ui.canvas.InkLayer
 import com.vivenotes.ui.canvas.InkSelectionFrame
 import com.vivenotes.ui.canvas.InkSelectionToolkit
 import com.vivenotes.ui.canvas.InsertCursorBadge
 import com.vivenotes.ui.canvas.LocalClipboardHtml
 import com.vivenotes.ui.canvas.LocalObjectGrab
+import com.vivenotes.ui.canvas.ObjectContextMenu
 import com.vivenotes.ui.canvas.ObjectGrab
 import com.vivenotes.ui.canvas.PageExtent
 import com.vivenotes.ui.canvas.PreviewLayout
@@ -125,10 +134,14 @@ import com.vivenotes.ui.ribbon.draw.*
 import com.vivenotes.workspace.CanvasViewport
 import com.vivenotes.workspace.InkPenSettings
 import com.vivenotes.workspace.InkTool
+import com.vivenotes.workspace.ObjectCommand
 import com.vivenotes.workspace.PageContent
 import com.vivenotes.workspace.RulerKind
 import com.vivenotes.workspace.TableEdit
 import com.vivenotes.workspace.WorkspaceState
+import com.vivenotes.workspace.canGroupSelection
+import com.vivenotes.workspace.selectionGrouped
+import com.vivenotes.workspace.toggleSelectionGroup
 import com.vivenotes.workspace.isPrimeObject
 import com.vivenotes.workspace.isUnwritten
 import com.vivenotes.workspace.movedBy
@@ -173,7 +186,7 @@ internal fun PageCanvas(
     onInkEdit: (com.vivenotes.data.InkEdit, com.vivenotes.model.ink.InkPage) -> Unit,
     onSelectInk: (InkSelection) -> Unit,
     onInkSelectionChange: (InkSelectionChange) -> Unit,
-    onInkGrouping: (InkSelectionChange) -> Unit,
+    onSelectionGrouping: (WorkspaceState, WorkspaceState) -> Unit,
     inkMathAvailable: Boolean,
     onInkMath: (InkSelection) -> Unit,
     onInkRecolor: (InkSelection, Int, Boolean, InkSelectionChange?) -> Unit,
@@ -192,6 +205,8 @@ internal fun PageCanvas(
     onResizeObjects: (Float, Float, Float, Float, Boolean) -> Unit,
     onCopyObjects: () -> Unit,
     onDeleteObjects: () -> Unit,
+    /** The prime object right-click menu's commands: on what is selected, or on this one object. */
+    onObjectCommand: (ObjectCommand, String?) -> Unit = { _, _ -> },
     onToggleObjectLock: () -> Unit,
     onColorObjects: (Int, Boolean) -> Unit,
     onShapeLineType: (LineType) -> Unit,
@@ -199,6 +214,9 @@ internal fun PageCanvas(
     onShapeFill: (Int?) -> Unit,
     onMoveShapeEnd: (String, Boolean, Float, Float, Boolean) -> Unit,
     onMoveShapeArm: (String, ShapeArm, Float, Boolean) -> Unit,
+    onMoveShapeVertex: (String, Int, Float, Float, Boolean) -> Unit = { _, _, _, _, _ -> },
+    onAddShapeVertex: (String, String) -> Unit = { _, _ -> },
+    onRemoveShapeVertex: (String, String, Boolean) -> Unit = { _, _, _ -> },
     onSelectObjectsInRect: (Float, Float, Float, Float) -> Unit,
     onSelectObjectsInLasso: (List<InkSample>, Map<String, Float>) -> Unit = { _, _ -> },
     onDrawObject: (Float, Float) -> Unit = { _, _ -> },
@@ -232,6 +250,20 @@ internal fun PageCanvas(
 ) {
     val page = state.selectedPage
     val interaction = rememberCanvasInteractionState(page, state, zoom)
+    val selectedCurve = (state.selectedPrimeObjects.singleOrNull() as? Outline.Shape)?.takeIf {
+        it.kind == ShapeKind.Curve && it.lockGroup == null && state.selectedInk == null &&
+            state.selectedTextOutlineIds.isEmpty() && page?.editable == true &&
+            !state.notebookTransfer.running && !state.filePane.busy && state.inkTool == null &&
+            !state.textToolArmed && state.drawPlacement == null
+    }
+    LaunchedEffect(selectedCurve?.id) {
+        if (selectedCurve == null) { interaction.curveVertexEdit = null; interaction.curveVertexPreview = null }
+    }
+    LaunchedEffect(selectedCurve?.id, selectedCurve?.segments?.size) {
+        if (selectedCurve == null || selectedCurve.segments.size <= 1 &&
+            interaction.curveVertexEdit?.mode == CurveVertexMode.Remove) interaction.curveVertexEdit = null
+        if (selectedCurve == null) interaction.curveVertexPreview = null
+    }
     val currentEditTextAt by rememberUpdatedState(onEditTextAt)
     val density = LocalDensity.current
     val focusManager = LocalFocusManager.current
@@ -267,7 +299,7 @@ internal fun PageCanvas(
     val inkMoveScope = rememberCoroutineScope()
     val currentSelectInk by rememberUpdatedState(onSelectInk)
     val currentInkSelectionChange by rememberUpdatedState(onInkSelectionChange)
-    val currentInkGrouping by rememberUpdatedState(onInkGrouping)
+    val currentSelectionGrouping by rememberUpdatedState(onSelectionGrouping)
     val currentInkRecolor by rememberUpdatedState(onInkRecolor)
     val currentPreparedPaste by rememberUpdatedState(onPreparedPaste)
     fun finishInkMove(selection: InkSelection, offset: Offset) {
@@ -314,6 +346,17 @@ internal fun PageCanvas(
     }
     val currentStateValue = rememberUpdatedState(state)
     val currentState by currentStateValue
+    fun groupSelection() {
+        if (interaction.inkMoveBusy) return
+        val before = currentState
+        interaction.inkMoveBusy = true
+        inkMoveScope.launch {
+            try {
+                val prepared = withContext(Dispatchers.Default) { before.toggleSelectionGroup() }
+                currentSelectionGrouping(before, prepared)
+            } finally { interaction.inkMoveBusy = false }
+        }
+    }
     val measuredTextHeights = remember(page?.id) { mutableStateMapOf<String, Float>() }
     val textMeasurementCache = remember(state.selectedNotebookId) { TextMeasurementCache() }
     val notebookPages = remember(state.notebooks, state.selectedNotebookId) {
@@ -564,6 +607,21 @@ internal fun PageCanvas(
         }
     }
 
+    /**
+     * The prime object menu at page [point]: on object [objectId], which a right-click selects as a
+     * click would unless it is already selected, or with null on the selection, whose frame it was in.
+     * [tableCell] is the row and column of the cell the point is in, when the object is a table.
+     */
+    fun openObjectMenu(objectId: String?, point: Offset, tableCell: Pair<Int, Int>? = null) {
+        focusManager.clearFocus()
+        canvasFocusRequester.requestFocus()
+        if (objectId != null && objectId !in currentState.selectedObjectIds) onSelectObject(objectId)
+        interaction.pastePoint = null
+        // Left as it is when the menu closes, so the cell's rows do not go before the menu has.
+        interaction.objectMenuCell = tableCell
+        interaction.objectMenu = point
+    }
+
     fun showsMoveBar(box: Outline.Text, snapshot: WorkspaceState): Boolean =
         snapshot.textBoxMoveBarMode(box).shows(hovered = interaction.hoveredTextBox == box.id)
 
@@ -576,7 +634,8 @@ internal fun PageCanvas(
             val margin = if (outline is Outline.Text && snapshot.focusedTextOutlineId == outline.id &&
                 !outline.isUnwritten()) 16f else 0f
             val chromeTop = if (outline is Outline.Text && showsMoveBar(outline, snapshot)) TEXT_BOX_MOVE_BAR_DP
-                else if (outline.id in snapshot.selectedObjectIds) 52f else 0f
+                else if (outline.id in snapshot.selectedObjectIds) 52f
+                else if (outline is Outline.Table && snapshot.showsTableHandles(outline)) TEXT_BOX_MOVE_BAR_DP else 0f
             point.x >= outline.x - margin && point.x <= outline.x + outline.primeWidth() + margin &&
                 point.y >= outline.y - chromeTop &&
                 point.y <= outline.y + height + margin
@@ -593,8 +652,9 @@ internal fun PageCanvas(
                 Offset(group.left - 6f, group.top - 6f), Offset(group.right + 6f, group.top - 6f),
                 Offset(group.left - 6f, group.bottom + 6f), Offset(group.right + 6f, group.bottom + 6f),
             ).any { (point - it).getDistance() <= 14f }
-        val moveBar = outlines.any { text ->
-            text is Outline.Text && text.moveBarContains(point) && showsMoveBar(text, snapshot)
+        val moveBar = outlines.any { outline ->
+            outline is Outline.Text && outline.moveBarContains(point) && showsMoveBar(outline, snapshot) ||
+                outline is Outline.Table && snapshot.tableMoveBarContains(outline, point)
         }
         val primeBounds = outlines.any { outline ->
             val margin = if (outline is Outline.Shape && outline.segments.isNotEmpty())
@@ -604,7 +664,10 @@ internal fun PageCanvas(
                 point.x in (outline.x - margin)..(outline.x + outline.primeWidth() + margin) &&
                 point.y in (outline.y - margin)..(outline.y + height + margin)
         }
-        return groupBody || groupCorner || moveBar || primeBounds
+        val vertexHandle = (snapshot.selectedPrimeObjects.singleOrNull() as? Outline.Shape)
+            ?.takeIf { snapshot.selectedInk == null && snapshot.selectedTextOutlineIds.isEmpty() && it.lockGroup == null }
+            ?.vertexNear(point.x, point.y, 24f / zoomState.value) != null
+        return groupBody || groupCorner || moveBar || primeBounds || vertexHandle
     }
 
     /** The selected objects' toolbar, which sits just above their frame. */
@@ -624,6 +687,7 @@ internal fun PageCanvas(
         val point = toPage(position)
         val toolArmed = snapshot.inkTool != null || snapshot.shapeToolArmed || snapshot.objectLassoArmed || snapshot.drawPlacement != null
         return when {
+            interaction.curveVertexEdit != null -> FingerRole.Content
             currentRuler?.grabs(RulerPoint(point.x, point.y)) == true -> FingerRole.Content
             toolArmed && currentDrawWithFinger -> FingerRole.Tool
             hitsSelectedTransform(point, snapshot) || hitsSelectionToolbar(point, snapshot, reach = 80f) ->
@@ -700,7 +764,20 @@ internal fun PageCanvas(
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        if (event.type == PointerEventType.Scroll && event.keyboardModifiers.isCtrlPressed) {
+                        val pinch = event.touchpadPinch
+                        if (pinch != null) {
+                            // A touchpad pinch zooms as two fingers on the screen do, but about the
+                            // cursor, which stays put while the fingers move: the page point under
+                            // it stays under it, as for Ctrl+wheel.
+                            val change = event.changes.firstOrNull() ?: continue
+                            when (pinch.phase) {
+                                TouchpadPinch.Phase.Begin -> touchActions.value.stopFling()
+                                TouchpadPinch.Phase.Update ->
+                                    touchActions.value.pinch(change.position, Offset.Zero, pinch.zoomChange)
+                                TouchpadPinch.Phase.End -> Unit
+                            }
+                            event.changes.forEach { it.consume() }
+                        } else if (event.type == PointerEventType.Scroll && event.keyboardModifiers.isCtrlPressed) {
                             val change = event.changes.firstOrNull() ?: continue
                             val delta = if (change.scrollDelta.y != 0f) change.scrollDelta.y
                                 else change.scrollDelta.x
@@ -731,6 +808,7 @@ internal fun PageCanvas(
                                 currentClearCanvasFocus()
                                 focusManager.clearFocus()
                                 canvasFocusRequester.requestFocus()
+                                interaction.objectMenu = null
                                 interaction.pastePoint = point.takeIf { canvasClipboard.canPaste() }
                                 event.changes.forEach { it.consume() }
                                 continue
@@ -838,7 +916,10 @@ internal fun PageCanvas(
                         onTitleChange = onTitleChange,
                         onClearCanvasFocus = onClearCanvasFocus
                     )
-                    val displayedOutlines = if (interaction.inkDragOffset == Offset.Zero) page.document.outlines else page.document.outlines.map { outline ->
+                    val previewOutlines = interaction.curveVertexPreview?.let { preview ->
+                        page.document.outlines.map { if (it.id == preview.id) preview else it }
+                    } ?: page.document.outlines
+                    val displayedOutlines = if (interaction.inkDragOffset == Offset.Zero) previewOutlines else previewOutlines.map { outline ->
                         if (outline.id !in state.selectedObjectIds && outline.id !in state.selectedTextOutlineIds) outline
                         else if (outline is Outline.Text) outline.copy(x = outline.x + interaction.inkDragOffset.x, y = outline.y + interaction.inkDragOffset.y)
                         else outline.movedBy(interaction.inkDragOffset.x, interaction.inkDragOffset.y)
@@ -916,7 +997,9 @@ internal fun PageCanvas(
                         onBodyChange = onBodyChange,
                         onTextShortcut = onTextShortcut,
                         onMoveShapeEnd = onMoveShapeEnd,
-                        onMoveShapeArm = onMoveShapeArm
+                        onMoveShapeArm = onMoveShapeArm,
+                        onObjectMenu = ::openObjectMenu,
+                        onObjectCommand = onObjectCommand,
                     )
                     val inkEnabled = page.editable && page.inkReady && !state.notebookTransfer.running && !state.filePane.busy
                     InkLayer(page.ink, canvasSize, shapeInk, visibleWindow, page.id,
@@ -946,9 +1029,10 @@ internal fun PageCanvas(
                         measuredTextHeights = measuredTextHeights,
                         canvasFocusRequester = canvasFocusRequester,
                         onMoveSelection = onMoveSelection,
-                        onResizeObjects = onResizeObjects
+                        onResizeObjects = onResizeObjects,
+                        onSelectionMenu = { point -> openObjectMenu(null, point) },
                     )
-                    CanvasObjectToolkit(
+                    if (selectedCurve == null) CanvasObjectToolkit(
                         state = state,
                         groupBounds = groupBounds,
                         measuredTextHeights = measuredTextHeights,
@@ -968,11 +1052,45 @@ internal fun PageCanvas(
                         onImageBackground = onImageBackground,
                         onCopyObjects = onCopyObjects,
                         onToggleObjectLock = onToggleObjectLock,
+                        onGroupSelection = ::groupSelection,
+                        groupingEnabled = !interaction.inkMoveBusy,
                         onDeleteObjects = onDeleteObjects
                     )
                 }
             }
         }
+        }
+        selectedCurve?.let { curve ->
+            val drawn = interaction.curveVertexPreview?.takeIf { it.id == curve.id } ?: curve
+            val pageToView: (Offset) -> Offset = { point ->
+                point * (zoom * density.density) - Offset(horizontalScroll.value.toFloat(), verticalScroll.value.toFloat())
+            }
+            if (interaction.curveVertexEdit == null) CurveVertexHandles(drawn, pageToView,
+                zoom * density.density, onPreview = { interaction.curveVertexPreview = it },
+                onMove = { id, index, x, y -> onMoveShapeVertex(id, index, x, y, true) })
+            CurveVertexInsertionOverlay(curve = curve,
+                visible = interaction.curveVertexEdit?.shapeId == curve.id,
+                mode = interaction.curveVertexEdit?.mode ?: CurveVertexMode.Add,
+                pageToView = pageToView,
+                onInsert = { segmentId ->
+                    interaction.curveVertexEdit = null
+                    onAddShapeVertex(curve.id, segmentId)
+                },
+                onRemove = { segmentId, atEnd ->
+                    interaction.curveVertexEdit = null
+                    onRemoveShapeVertex(curve.id, segmentId, atEnd)
+                }, onDismiss = { interaction.curveVertexEdit = null })
+            CanvasObjectToolkit(state = state, groupBounds = null, measuredTextHeights = measuredTextHeights,
+                shapeInk = canvasPalette(page.document.style, canvasDark).ink, heldTable = null,
+                onColorObjects = onColorObjects, onTableEdit = onTableEdit, onReleaseTable = {},
+                onEquationChange = onEquationChange, onShapeLineType = onShapeLineType,
+                onShapeWidth = onShapeWidth, onShapeFill = onShapeFill, onImageBackground = onImageBackground,
+                onCopyObjects = onCopyObjects, onToggleObjectLock = onToggleObjectLock, onDeleteObjects = onDeleteObjects,
+                curveVertexMode = interaction.curveVertexEdit?.mode,
+                onCurveVertexMode = { mode ->
+                    val next = CurveVertexEdit(curve.id, mode)
+                    interaction.curveVertexEdit = if (interaction.curveVertexEdit == next) null else next
+                }, shapePreview = drawn, pageToView = pageToView)
         }
         state.selectedInk?.let { selection ->
             val bounds = selectedCanvasBounds(page.document.outlines, state.selectedObjectIds + state.selectedTextOutlineIds,
@@ -983,22 +1101,10 @@ internal fun PageCanvas(
             InkSelectionToolkit(selection, viewBounds, interaction.viewportPx, ink,
                 enabled = page.editable && page.inkReady && !state.notebookTransfer.running && !state.filePane.busy && !interaction.inkMoveBusy,
                 showColor = state.selectedTextOutlineIds.isEmpty(), onBoundsChange = { interaction.inkToolkitBoundsInView = it },
-                showGroup = state.inkOnlySelection && (selection.targetIds.size > 1 || selection.isGrouped),
+                showGroup = state.canGroupSelection, grouped = state.selectionGrouped,
                 showMath = state.inkAndLinesSelection && inkMathAvailable,
                 onMath = { onInkMath(selection) },
-                onGroup = {
-                    if (!interaction.inkMoveBusy) {
-                        interaction.inkMoveBusy = true
-                        inkMoveScope.launch {
-                            try {
-                                val change = withContext(Dispatchers.Default) {
-                                    if (selection.isGrouped) selection.ungroup() else selection.group()
-                                }
-                                if (change != null) currentInkGrouping(change)
-                            } finally { interaction.inkMoveBusy = false }
-                        }
-                    }
-                },
+                onGroup = ::groupSelection,
                 onCopy = onCopyObjects, onDelete = onDeleteObjects, onColor = { argb, followsTheme ->
                     if (!interaction.inkMoveBusy) {
                         interaction.inkMoveBusy = true
@@ -1031,6 +1137,33 @@ internal fun PageCanvas(
                     interaction.pastePoint = null
                 }, modifier = Modifier.testTag(WorkspaceTestTags.CanvasPaste))
         }
+        // Nothing left to act on — an undo, or the objects gone in a sync — closes it for good, so a
+        // later selection does not bring it back.
+        if (interaction.objectMenu != null && !state.hasObjectSelection) SideEffect { interaction.objectMenu = null }
+        // One table right-clicked on a cell — a locked one, or one that holds only ink, whose cells
+        // have no menu of their own — also offers that cell's row and column commands.
+        val menuTable = (state.selectedPrimeObjects.singleOrNull() as? Outline.Table)?.takeIf {
+            state.selectedObjectIds.size == 1 && state.selectedTextOutlineIds.isEmpty() && state.selectedInk == null
+        }
+        val menuCell = interaction.objectMenuCell
+        ObjectContextMenu(
+            own = if (menuTable == null || menuCell == null) null else { {
+                TableGridMenuItems(menuTable, menuCell.first, menuCell.second, page.editable) { edit ->
+                    interaction.objectMenu = null
+                    onTableEdit(edit)
+                }
+            } },
+            anchor = interaction.objectMenu?.takeIf { state.hasObjectSelection }?.let { point ->
+                Offset(point.x * zoom * density.density - horizontalScroll.value,
+                    point.y * zoom * density.density - verticalScroll.value)
+            },
+            editable = page.editable,
+            onCommand = { command ->
+                interaction.objectMenu = null
+                onObjectCommand(command, null)
+            },
+            onDismiss = { interaction.objectMenu = null },
+        )
         if (state.selectedInk == null) SideEffect { interaction.inkToolkitBoundsInView = null }
         if (page.content == PageContent.Unreadable) {
             StatusBanner(

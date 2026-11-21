@@ -23,6 +23,30 @@ import java.io.File
 import kotlin.test.*
 
 class PdfRenderingTest {
+    @Test
+    fun svgArtworkExportsAsVectorPathsAndRetainsTheOriginalAttachment() = runBlocking {
+        fixture { repository, attachments, page, directory, exporter ->
+            val source = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40"><path fill="red" d="M40 0h40v40H40z"/></svg>""".encodeToByteArray()
+            val picture = assertNotNull(attachments.import(source))
+            repository.saveDoc(page, PageDoc(style = style, outlines = listOf(
+                Outline.Image("svg", x = 100f, y = 100f, width = 400f, height = 200f,
+                    attachmentId = picture.attachmentId),
+            )))
+            val plan = exporter.plan(PdfExportRequest(page, null, PdfExportOptions(includeRuling = false)))
+            val output = File(directory, "vector-svg.pdf")
+            exporter.write(plan, output.path)
+            Loader.loadPDF(output).use { pdf ->
+                val rendered = PDFRenderer(pdf).renderImageWithDPI(0, 160f)
+                assertEquals(0xffff0000.toInt(), rendered.getRGB(400, 200))
+                assertEquals(0xffffffff.toInt(), rendered.getRGB(150, 200))
+                val resources = pdf.getPage(0).resources
+                assertTrue(resources.xObjectNames.none {
+                    resources.getXObject(it) is org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject
+                }, "SVG must reach the PDF as vector paths")
+            }
+            assertContentEquals(source, attachments.bytes(picture.attachmentId))
+        }
+    }
     private suspend fun fixture(block: suspend (NotesRepository, AttachmentStore, String, File, PdfExporter) -> Unit) {
         val directory = Files.createTempDirectory("vive-pdf-render").toFile()
         val db = NotesDatabase.create(File(directory, "notes.db"))
@@ -35,6 +59,38 @@ class PdfRenderingTest {
         finally { exporter.release(); db.close(); directory.deleteRecursively() }
     }
     private val style = PageStyle(hideTitle = true, paper = PaperSize.A4, ruleLines = RuleLines.None)
+
+    @Test
+    fun newSolidsKeepTheirFillAndOpenBoreInThePreviewAndSavedPdf() = runBlocking {
+        fixture { repository, _, page, directory, exporter ->
+            val paper = 0xffe7d9b4.toInt()
+            val blue = 0xff3584e4.toInt()
+            val outlines = listOf(Triple(ShapeKind.HollowCylinder, 20f, 20f),
+                Triple(ShapeKind.Hemisphere, 300f, 20f), Triple(ShapeKind.Frustum, 20f, 230f)).map { (kind, x, y) ->
+                Outline.Shape(id = kind.name, kind = kind,
+                    segments = seedSegments(kind, x, y, x + 240f, y + 180f) { "edge" },
+                    fillArgb = blue).withRecomputedBounds()
+            }
+            val doc = PageDoc(style = style.copy(backgroundArgb = paper), outlines = outlines)
+            repository.saveDoc(page, doc)
+            val plan = exporter.plan(PdfExportRequest(page, null, PdfExportOptions(includeRuling = false)))
+            val preview = assertNotNull(exporter.preview(plan, 0, plan.paper.widthDp.toInt())).toPixelMap()
+            fun check(pixel: (Int, Int) -> Int) {
+                assertEquals(paper, pixel(140, 54), "tube bore is filled")
+                assertEquals(blue, pixel(245, 54), "tube annulus is missing")
+                assertEquals(blue, pixel(420, 60), "hemisphere dome is missing")
+                assertEquals(blue, pixel(140, 330), "frustum body is missing")
+            }
+            check { x, y -> preview[x, y].toArgb() }
+            val output = File(directory, "educational-solids.pdf")
+            exporter.write(plan, output.path)
+            Loader.loadPDF(output).use { pdf ->
+                val rendered = PDFRenderer(pdf).renderImageWithDPI(0, 160f)
+                check(rendered::getRGB)
+            }
+            assertEquals(doc, (repository.loadDoc(page) as PageLoad.Loaded).doc)
+        }
+    }
 
     @Test
     fun scriptsQuotesHeadingsAndNumberingUseAndroidsExportMetrics() = runBlocking {

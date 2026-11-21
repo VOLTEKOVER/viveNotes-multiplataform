@@ -48,12 +48,15 @@ import androidx.compose.ui.zIndex
 import com.vivenotes.localization.Strings
 import com.vivenotes.model.Outline
 import com.vivenotes.model.ink.LineType
+import com.vivenotes.ui.canvas.CurveVertexMode
 import com.vivenotes.ui.canvas.LocalObjectGrab
 import com.vivenotes.ui.canvas.SelectionColorButton
+import com.vivenotes.ui.canvas.SelectionGroupButton
 import com.vivenotes.ui.canvas.detectObjectDrag
 import com.vivenotes.ui.canvas.primeResizePointer
 import com.vivenotes.ui.canvas.selectedCanvasBounds
 import com.vivenotes.ui.components.TooltipIconButton
+import com.vivenotes.ui.components.onSecondaryPress
 import com.vivenotes.ui.icons.DocumentSymbols
 import com.vivenotes.ui.icons.ObjectSymbols
 import com.vivenotes.ui.ribbon.document.PictureObjectTools
@@ -63,6 +66,8 @@ import com.vivenotes.workspace.TableEdit
 import com.vivenotes.workspace.WorkspaceState
 import com.vivenotes.workspace.primeHeight
 import com.vivenotes.workspace.primeWidth
+import com.vivenotes.workspace.canGroupSelection
+import com.vivenotes.workspace.selectionGrouped
 
 @Composable
 internal fun CanvasGroupSelection(
@@ -73,6 +78,8 @@ internal fun CanvasGroupSelection(
     canvasFocusRequester: FocusRequester,
     onMoveSelection: (Float, Float, Boolean) -> Unit,
     onResizeObjects: (Float, Float, Float, Float, Boolean) -> Unit,
+    /** A right-click (a held finger) in the frame, at this page point: the menu of what it holds. */
+    onSelectionMenu: (Offset) -> Unit = {},
 ) {
     val currentState by workspaceState
     val density = LocalDensity.current
@@ -80,8 +87,14 @@ internal fun CanvasGroupSelection(
     val currentMoveSelection by rememberUpdatedState(onMoveSelection)
     val currentResizeObjects by rememberUpdatedState(onResizeObjects)
     val grab = LocalObjectGrab.current
+    val currentSelectionMenu by rememberUpdatedState(onSelectionMenu)
     if (groupBounds != null && state.selectedInk == null) {
         val padding = 6.dp
+        // The frame lies over what it holds, so a right-click on any of them lands here.
+        val origin by rememberUpdatedState(Offset(groupBounds.left - padding.value, groupBounds.top - padding.value))
+        val openMenu: (Offset) -> Unit = remember(density) {
+            { position -> currentSelectionMenu(origin + position / density.density) }
+        }
         val left = groupBounds.left.dp - padding
         val top = groupBounds.top.dp - padding
         val right = groupBounds.right.dp + padding
@@ -95,6 +108,7 @@ internal fun CanvasGroupSelection(
                     style = Stroke(width = stroke))
             }
             .testTag(WorkspaceTestTags.GroupSelectionFrame)
+            .onSecondaryPress(Unit, openMenu)
             .pointerInput(state.selectedPage?.id, state.selectedObjectIds, state.selectedTextOutlineIds,
                 state.selectedObjectsLocked) {
                 var firstChange = true
@@ -195,11 +209,24 @@ internal fun CanvasObjectToolkit(
     onGraphEquation: (Outline.Equation) -> Unit = {},
     /** Opens an equation in the Math pane. Null where there is no pane to open, and no button. */
     onOpenEquationInMath: ((Outline.Equation) -> Unit)? = null,
+    onGroupSelection: () -> Unit = {},
+    groupingEnabled: Boolean = true,
+    curveVertexMode: CurveVertexMode? = null,
+    onCurveVertexMode: ((CurveVertexMode) -> Unit)? = null,
+    shapePreview: Outline.Shape? = null,
+    pageToView: ((Offset) -> Offset)? = null,
 ) {
-    if (state.selectedObjectIds.isNotEmpty() && state.selectedInk == null) {
-        val selected = state.selectedPrimeObjects.firstOrNull()
+    if ((state.selectedObjectIds.isNotEmpty() || state.canGroupSelection && state.selectedTextOutlineIds.isNotEmpty()) &&
+        state.selectedInk == null) {
+        val selected = (state.selectedPrimeObjects.firstOrNull() ?: state.selectedPage?.document?.outlines
+            ?.firstOrNull { it.id in state.selectedTextOutlineIds })?.let { original ->
+                shapePreview?.takeIf { it.id == original.id } ?: original
+            }
         if (selected != null) {
-            val bounds = groupBounds ?: Rect(selected.x, selected.y, selected.x + selected.primeWidth(),
+            // A table alone in the selection wears its move bar above its frame; the toolkit clears it.
+            val barRoom = if (groupBounds == null && selected is Outline.Table && selected.lockGroup == null &&
+                state.showsTableHandles(selected)) selected.y - selected.moveBarTop else 0f
+            val bounds = groupBounds ?: Rect(selected.x, selected.y - barRoom, selected.x + selected.primeWidth(),
                 selected.y + (measuredTextHeights[selected.id] ?: selected.primeHeight()))
             var toolkitSize by remember { mutableStateOf(IntSize.Zero) }
             Surface(color = Color(0xFF202124), contentColor = Color(0xFFE8EAED),
@@ -207,9 +234,13 @@ internal fun CanvasObjectToolkit(
                 modifier = Modifier
                     .offset {
                         val gap = 12.dp.roundToPx()
-                        val above = bounds.top.dp.roundToPx() - toolkitSize.height - gap
-                        IntOffset((bounds.center.x.dp.roundToPx() - toolkitSize.width / 2).coerceAtLeast(0),
-                            if (above >= 0) above else bounds.bottom.dp.roundToPx() + gap)
+                        val top = pageToView?.invoke(Offset(bounds.center.x, bounds.top))
+                            ?: Offset(bounds.center.x.dp.toPx(), bounds.top.dp.toPx())
+                        val bottom = pageToView?.invoke(Offset(bounds.center.x, bounds.bottom))
+                            ?: Offset(bounds.center.x.dp.toPx(), bounds.bottom.dp.toPx())
+                        val above = top.y.toInt() - toolkitSize.height - gap
+                        IntOffset((top.x.toInt() - toolkitSize.width / 2).coerceAtLeast(0),
+                            if (above >= 0) above else bottom.y.toInt() + gap)
                     }
                     .onSizeChanged { toolkitSize = it }
                     .testTag(WorkspaceTestTags.ObjectToolkit)) {
@@ -246,6 +277,9 @@ internal fun CanvasObjectToolkit(
                                 modifier = Modifier.size(18.dp))
                         }
                     }
+                    if (state.canGroupSelection) SelectionGroupButton(state.selectionGrouped,
+                        groupingEnabled && state.selectedPage?.editable == true && state.selectedPage?.inkReady == true &&
+                            !state.notebookTransfer.running && !state.filePane.busy, onGroupSelection)
                     if (state.selectedObjectIds.size == 1 && state.selectedTextOutlineIds.isEmpty()) {
                         if (selected is Outline.Table) TableObjectTools(selected, heldTable, onTableEdit, onReleaseTable)
                         // One formula, one graph — and one formula in the pane: several held
@@ -255,7 +289,7 @@ internal fun CanvasObjectToolkit(
                     }
                     if (selected is Outline.Shape && state.selectedObjectIds.size == 1 &&
                         state.selectedTextOutlineIds.isEmpty()) {
-                        ShapeObjectTools(selected, onShapeLineType, onShapeWidth, onShapeFill)
+                        ShapeObjectTools(selected, onShapeLineType, onShapeWidth, onShapeFill, curveVertexMode, onCurveVertexMode)
                     }
                     graphActions?.let { actions ->
                         GraphActions(state.selectedPrimeObjects.filterIsInstance<Outline.Graph>(), actions)

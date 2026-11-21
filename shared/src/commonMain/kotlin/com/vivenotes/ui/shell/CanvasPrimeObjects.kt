@@ -44,10 +44,12 @@ import com.vivenotes.data.PictureLibrary
 import com.vivenotes.localization.Strings
 import com.vivenotes.model.Outline
 import com.vivenotes.model.ink.ShapeArm
+import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.ShapeAxis
 import com.vivenotes.model.ink.arms
 import com.vivenotes.model.ink.ends
 import com.vivenotes.ui.canvas.LocalObjectGrab
+import com.vivenotes.ui.canvas.LocalWordSelectionActions
 import com.vivenotes.ui.canvas.PictureAsset
 import com.vivenotes.ui.search.PictureSearchOverlay
 import com.vivenotes.ui.canvas.PictureContent
@@ -55,8 +57,10 @@ import com.vivenotes.ui.canvas.RichTextColors
 import com.vivenotes.ui.canvas.detectObjectDrag
 import com.vivenotes.ui.canvas.drawDocumentShape
 import com.vivenotes.ui.canvas.primeResizePointer
+import com.vivenotes.ui.components.onSecondaryPress
 import com.vivenotes.ui.ribbon.draw.*
 import com.vivenotes.workspace.TABLE_GUTTER
+import com.vivenotes.workspace.ObjectCommand
 import com.vivenotes.workspace.TableEdit
 import com.vivenotes.workspace.WorkspaceState
 import com.vivenotes.workspace.isPrimeObject
@@ -100,6 +104,10 @@ internal fun CanvasPrimeObjects(
     onGraphParameter: (String, Int, Double) -> Unit = { _, _, _ -> },
     /** A slider's name clicked: the graph whose Sliders dialog opens. */
     onEditGraphSliders: (String) -> Unit = {},
+    /** A right-click (a held finger) on an object, at this page point, on this row and column of a table: its menu, `diagram.md`'s. */
+    onObjectMenu: (String, Offset, Pair<Int, Int>?) -> Unit = { _, _, _ -> },
+    /** Cut, Copy or Delete of this table, from the menu of one of its cells. */
+    onObjectCommand: (ObjectCommand, String) -> Unit = { _, _ -> },
 ) {
     val highlights = com.vivenotes.ui.search.rememberImageSearchHighlights(pictureHighlights, searchImageFocus)
     val density = LocalDensity.current
@@ -108,6 +116,8 @@ internal fun CanvasPrimeObjects(
     val grab = LocalObjectGrab.current
     val currentSelectObject by rememberUpdatedState(onSelectObject)
     val currentResizeObjects by rememberUpdatedState(onResizeObjects)
+    val currentObjectMenu by rememberUpdatedState(onObjectMenu)
+    val wordActions = LocalWordSelectionActions.current
     val measurementKeys = remember(measuredTextHeights) { mutableStateMapOf<String, TableMeasurementKey>() }
     val visible by remember(viewport) { derivedStateOf { canvasDemandWindow(viewport()) } }
     val primeOutlines = remember(displayedOutlines) { displayedOutlines.filter { it.isPrimeObject() } }
@@ -146,9 +156,7 @@ internal fun CanvasPrimeObjects(
         }
         val height = (objectHeight + 2f * visualPad).coerceAtLeast(24f).dp
         // A table alone in the selection, or one being typed in, shows its handles.
-        val tableActive = outline is Outline.Table && groupBounds == null && state.selectedInk == null &&
-            state.selectedTextOutlineIds.isEmpty() && (state.selectedObjectIds == setOf(outline.id) ||
-                outline.locate(state.focusedTextOutlineId.orEmpty()) != null)
+        val tableActive = outline is Outline.Table && groupBounds == null && state.showsTableHandles(outline)
         val label = when (outline) {
             is Outline.Shape -> outline.kind.label
             is Outline.Table -> Strings.table
@@ -161,6 +169,20 @@ internal fun CanvasPrimeObjects(
         // only a picture that cannot be drawn gets a plate (see PictureContent).
         val drawnPicture = outline is Outline.Image && pictures != null
         val drawnObject = drawnPicture || drawnShape || outline is Outline.Table || outline is Outline.Equation || outline is Outline.Graph
+        // The box's corner on the page: a press in the box is this plus its position over the density,
+        // the zoom being a layer scale above. Read when pressed, so the handler outlives a move.
+        val origin by rememberUpdatedState(Offset(outline.x + inset, outline.y + inset))
+        val menuTable by rememberUpdatedState(outline as? Outline.Table)
+        val menuRows by rememberUpdatedState(tableRows)
+        val openMenu: (Offset) -> Unit = remember(outline.id, density) {
+            { position ->
+                val point = origin + position / density.density
+                // A table says which cell: its menu adds that cell's row and column commands.
+                currentObjectMenu(outline.id, point, menuTable?.gridCellAt(menuRows, point))
+            }
+        }
+        // A typed table's cells open menus of their own, which carry the table's commands too.
+        val cellMenus = outline is Outline.Table && tableCellMenus(outline, wordActions)
         Surface(
             color = if (drawnObject) Color.Transparent else MaterialTheme.colorScheme.surfaceContainer,
             shape = MaterialTheme.shapes.small,
@@ -168,10 +190,12 @@ internal fun CanvasPrimeObjects(
             modifier = Modifier.offset(x, y).size(width, height)
                 .testTag(WorkspaceTestTags.primeObject(outline.id))
                 // A picture shows its own edges; only its selection is outlined. A table's is dashed, in its chrome.
-                .then(if (drawnObject && (!selected || groupBounds != null || outline is Outline.Table)) Modifier else Modifier.border(
+                .then(if (drawnObject && (!selected || groupBounds != null || outline is Outline.Table ||
+                    outline is Outline.Shape && outline.kind == ShapeKind.Curve && outline.lockGroup == null)) Modifier else Modifier.border(
                     if (selected && groupBounds == null) 2.dp else 1.dp,
                     if (selected && groupBounds == null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
                     MaterialTheme.shapes.small))
+                .then(if (cellMenus) Modifier else Modifier.onSecondaryPress(outline.id, openMenu))
                 .pointerInput(outline.id) {
                     var firstChange = true
                     detectObjectDrag(grab,
@@ -200,13 +224,15 @@ internal fun CanvasPrimeObjects(
             Box(contentAlignment = Alignment.Center) {
                 if (outline is Outline.Image && pictures != null) {
                     PictureContent(pictureAssets[outline.attachmentId], outline.backgroundArgb)
-                    if (pictureAssets[outline.attachmentId] is PictureAsset.Ready) {
+                    if (pictureAssets[outline.attachmentId] is PictureAsset.Ready || pictureAssets[outline.attachmentId] is PictureAsset.Vector) {
                         PictureSearchOverlay(outline, highlights, viewport)
                     }
                 } else if (outline is Outline.Table) {
                     TableContent(outline, tableRows, shapeInk, state, richColors, editorFocusRequester,
                         onFocusTextBox, onBodyChange, onTextShortcut, heldTable?.takeIf { it.tableId == outline.id },
-                        MaterialTheme.colorScheme.primary.copy(alpha = .22f))
+                        MaterialTheme.colorScheme.primary.copy(alpha = .22f),
+                        onObjectCommand = { command -> onObjectCommand(command, outline.id) },
+                        onTableEdit = onTableEdit)
                 } else if (outline is Outline.Graph) {
                     com.vivenotes.ui.canvas.GraphContent(outline,
                         selected = selected && groupBounds == null && state.selectedInk == null && state.selectedTextOutlineIds.isEmpty(),
@@ -264,14 +290,21 @@ internal fun CanvasPrimeObjects(
                 onRowMinHeight = { row, minHeight, first ->
                     onTableEdit(TableEdit.RowMinHeight(outline.id, row, minHeight, recordHistory = first))
                 },
-                onMove = { dx, dy, first -> currentMoveObject(outline.id, dx, dy, first) },
+                onMove = { dx, dy, first ->
+                    // Moving holds the table as an object: the cell being typed in gives up its caret.
+                    if (first) {
+                        focusManager.clearFocus()
+                        canvasFocusRequester.requestFocus()
+                    }
+                    currentMoveObject(outline.id, dx, dy, first)
+                },
                 onScale = { sx, sy, first ->
                     if (outline.id !in workspaceState.value.selectedObjectIds) currentSelectObject(outline.id)
                     currentResizeObjects(outline.x, outline.y, sx, sy, first)
                 })
         }
         if (selected && outline.lockGroup == null && groupBounds == null && state.selectedTextOutlineIds.isEmpty() &&
-            outline !is Outline.Table && (outline !is Outline.Shape || !outline.kind.hasEnds)) {
+            outline !is Outline.Table && (outline !is Outline.Shape || !outline.kind.hasEnds && outline.kind != ShapeKind.Curve)) {
             val corners = listOf(
                 x to y, x + width to y, x to y + height, x + width to y + height,
             )

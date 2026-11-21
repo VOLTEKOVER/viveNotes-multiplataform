@@ -10,8 +10,12 @@ import com.vivenotes.richtext.TextSelection
 
 data class SelectedTextRange(val containerId: String, val range: TextSelection, val typingMarks: Set<Mark>? = null)
 
-/** Transient selections in one text box or in the cells of one table; the last range is active. */
-data class WordSelections(val pageId: String, val ownerId: String, val ranges: List<SelectedTextRange>)
+/**
+ * Transient selections in one text box or in the cells of one table; the last range is active.
+ * [cells] are the table cells selected whole — a row, a column or the table — which the canvas tints.
+ */
+data class WordSelections(val pageId: String, val ownerId: String, val ranges: List<SelectedTextRange>,
+                          val cells: Set<String> = emptySet())
 
 internal val WorkspaceState.activeWordSelections: WordSelections?
     get() = wordSelections?.takeIf { group ->
@@ -100,7 +104,7 @@ internal val WorkspaceState.selectedTextMarks: Set<Mark>
         if (activeWordSelections == null) return richText?.activeMarks.orEmpty()
         val marks = orderedTextRanges().mapNotNull { target ->
             selectedPage?.document?.textIndex?.get(target.containerId)?.blocks?.let {
-                RichTextBuffer(it).select(target.range).let { buffer ->
+                textBuffer(it).select(target.range).let { buffer ->
                     buffer.copy(typingMarks = target.typingMarks ?: buffer.typingMarks).activeMarks
                 }
             }
@@ -128,7 +132,7 @@ internal fun WorkspaceState.editTextSelections(
     val marksAfter = mutableMapOf<SelectedTextRange, Set<Mark>>()
     for ((id, targets) in group.ranges.groupBy { it.containerId }) {
         val before = page.document.textIndex[id]?.blocks ?: return this
-        var buffer = RichTextBuffer(before)
+        var buffer = textBuffer(before)
         if (paragraphs) {
             var start = 0
             val starts = before.mapNotNull { block ->
@@ -175,7 +179,7 @@ internal fun WorkspaceState.editTextSelections(
     val changed = changes.any { it.before != it.after }
     return updatePage(page.id) { it.withDocument(it.document.withTextBlocks(results)) }.copy(
         editorSelection = primary.range, wordSelections = updatedGroup,
-        typingMarks = primary.typingMarks ?: RichTextBuffer(results.getValue(primary.containerId)).select(primary.range).typingMarks,
+        typingMarks = primary.typingMarks ?: textBuffer(results.getValue(primary.containerId)).select(primary.range).typingMarks,
         editorComposition = null, typingRun = null,
         structuralUndo = if (changed) (structuralUndo + StructuralSnapshot(page.id, page.document, text = primaryChange)).takeLast(100) else structuralUndo,
         structuralRedo = if (changed) emptyList() else structuralRedo,

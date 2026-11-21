@@ -1,3 +1,5 @@
+@file:Suppress("INVISIBLE_MEMBER", "INVISIBLE_REFERENCE")
+
 package com.vivenotes.ui.shell
 
 import androidx.compose.runtime.CompositionLocalProvider
@@ -5,6 +7,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.selection.SelectionHandleInfoKey
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
@@ -15,16 +18,21 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ComposeUiTest
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.rightClick
 import androidx.compose.ui.test.v2.runDesktopComposeUiTest
@@ -33,6 +41,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import com.vivenotes.data.ClipboardHtml
 import com.vivenotes.model.Block
+import com.vivenotes.model.Align
 import com.vivenotes.model.BlockType
 import com.vivenotes.model.Mark
 import com.vivenotes.model.Outline
@@ -52,6 +61,29 @@ import kotlin.test.assertTrue
 /** The text box bugs reported on the Test page, each from a fresh workspace, as a person meets them. */
 @OptIn(ExperimentalTestApi::class)
 class TextBoxEditingTest {
+
+    @Test
+    fun alignmentButtonsKeepMouseSelectionWithoutTouchHandles() = runDesktopComposeUiTest(width = 1400, height = 900) {
+        val state = page(Block.of("First paragraph"), Block.of("Second paragraph"), Block.of(""))
+        var observed = state
+        setWorkspace(state) { observed = it }
+        val editor = onNodeWithTag(WorkspaceTestTags.BodyEditor)
+        editor.performMouseInput { click(Offset(50f, 12f)) }
+        editor.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.A) } }
+        onAllNodes(SemanticsMatcher.keyIsDefined(SelectionHandleInfoKey)).assertCountEquals(0)
+        listOf(Align.Center, Align.End, Align.Start, Align.Center).forEach { align ->
+            onNodeWithTag(DocumentRibbonTags.alignment(align)).performMouseInput { click(center) }
+            runOnIdle {
+                assertEquals("First paragraph\nSecond paragraph\n", observed.richText!!.text)
+                assertEquals(listOf(align, align, align), observed.richText!!.blocks.map { it.align })
+                val layout = editor.textLayout()
+                assertEquals(3, layout.lineCount)
+                assertEquals(TextSelection(0, observed.richText!!.text.length), observed.editorSelection)
+            }
+            editor.assertIsFocused()
+            onAllNodes(SemanticsMatcher.keyIsDefined(SelectionHandleInfoKey)).assertCountEquals(0)
+        }
+    }
 
     /** The demo page with its first text box — 720 dp wide, under the title — holding [blocks], unedited. */
     private fun page(vararg blocks: Block): WorkspaceState {
@@ -285,6 +317,53 @@ class TextBoxEditingTest {
         editor.performKeyInput { withKeyDown(Key.CtrlLeft) { withKeyDown(Key.ShiftLeft) { pressKey(Key.V) } } }
         assertPasted("Paste as plain text", List(3) { BlockType.Bullet })
     }
+
+    /**
+     * Reported: with the size's default set to 20, pasted text came out at 15, and so did what was
+     * written in the box afterwards, even once its size had been put right.
+     */
+    @Test
+    fun aDefaultSizeSetWhileEditingReachesPastedTextAndWhatIsWrittenAfterIt() =
+        runDesktopComposeUiTest(width = 1400, height = 900) {
+            val clipboard = FakeClipboard(AnnotatedString("one\n\ntwo"))
+            var copiedHtml: String? = "<meta charset='utf-8'><p>one</p><p>two</p>"
+            val state = page(Block(id = "empty"))
+            var observed = state
+            setWorkspace(state, clipboard, ClipboardHtml { copiedHtml }) { observed = it }
+            val editor = onNodeWithTag(WorkspaceTestTags.BodyEditor)
+            val size = onNodeWithTag(DocumentRibbonTags.FontSize)
+            fun sizes() = runOnIdle {
+                observed.richText!!.blocks.map { block ->
+                    block.runs.map { run -> run.marks.filterIsInstance<Mark.FontSize>().singleOrNull()?.sp }
+                }
+            }
+
+            editor.performMouseInput { click(Offset(400f, 20f)) }
+            size.assertTextContains("15")
+            size.performClick()
+            onNodeWithTag("${DocumentRibbonTags.FontSize}-20").performTouchInput { longClick() }
+            runOnIdle { assertEquals(20, observed.editorDefaults.fontSize) }
+            size.assertTextContains("20")
+            // The keyboard is back in the box, as after picking a size for it.
+            editor.assertIsFocused()
+            editor.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.V) } }
+            assertEquals(listOf(listOf(20), emptyList(), listOf(20)), sizes(), "pasted from a browser")
+
+            // The blank line between the pasted paragraphs writes in the default too.
+            editor.performMouseInput { click(Offset(60f, editor.textLayout().lineMiddle(1))) }
+            runOnIdle { assertEquals(TextSelection(4), observed.editorSelection) }
+            size.assertTextContains("20")
+            editor.performTextInput("x")
+            assertEquals(listOf(listOf(20), listOf(20), listOf(20)), sizes(), "typed on the blank line")
+
+            // Pasting over all of it writes in the size of what it replaces.
+            copiedHtml = null
+            clipboard.value = AnnotatedString("replaced")
+            editor.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.A) } }
+            editor.performKeyInput { withKeyDown(Key.CtrlLeft) { pressKey(Key.V) } }
+            runOnIdle { assertEquals("replaced", observed.richText!!.text) }
+            assertEquals(listOf(listOf(20)), sizes(), "pasted over a selection")
+        }
 
     private fun ComposeUiTest.setWorkspace(
         initial: WorkspaceState,

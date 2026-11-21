@@ -10,6 +10,20 @@ import androidx.compose.ui.unit.dp
 
 /** Android ObjectTooltip Material Symbols Rounded paths. */
 object ObjectSymbols {
+    /** Google Material Symbols Rounded, KeepOff; same Apache-2.0 path as Android. */
+    val KeepOff: ImageVector by lazy {
+        ImageVector.Builder("KeepOff", 24.dp, 24.dp, 960f, 960f).group(translationY = 960f) {
+            addPath(addPathNodes("M560-760H400v87L290-783q-5-5-7.5-11t-2.5-12q0-13 9-23.5t24-10.5h327q17 0 28.5 11.5T680-800q0 16-14.5 22.5T640-760v240q0 17-11.5 28.5T600-480q-17 0-28.5-11.5T560-520v-240ZM440-80v-240H296q-25 0-40-17.5T241-377q0-11 4.5-22t14.5-21l60-60v-46L84-764q-11-11-11.5-27.5T84-820q11-11 28-11t28 11l679 679q12 12 11.5 28.5T818-84q-12 11-28 11.5T762-84L526-320h-6v240q0 17-11.5 28.5T480-40q-17 0-28.5-11.5T440-80Zm-86-320h92l-44-44-2-2-46 46Zm126-193Zm-78 149Z"), fill = SolidColor(Color.Black))
+        }.build()
+    }
+
+    /** Google Material Symbols Rounded, Keep; same Apache-2.0 path as Android. */
+    val Keep: ImageVector by lazy {
+        ImageVector.Builder("Keep", 24.dp, 24.dp, 960f, 960f).group(translationY = 960f) {
+            addPath(addPathNodes("M640-760v280l68 68q6 6 9 13.5t3 15.5v23q0 17-11.5 28.5T680-320H520v234q0 17-11.5 28.5T480-46q-17 0-28.5-11.5T440-86v-234H280q-17 0-28.5-11.5T240-360v-23q0-8 3-15.5t9-13.5l68-68v-280q-17 0-28.5-11.5T280-800q0-17 11.5-28.5T320-840h320q17 0 28.5 11.5T680-800q0 17-11.5 28.5T640-760ZM354-400h252l-46-46v-314H400v314l-46 46Zm126 0Z"), fill = SolidColor(Color.Black))
+        }.build()
+    }
+
     val Functions: ImageVector by lazy {
         ImageVector.Builder("Functions", 24.dp, 24.dp, 960f, 960f).group(translationY = 960f) {
             addPath(addPathNodes("M500-480 253-708q-6-6-9.5-13.5T240-737v-23q0-17 11.5-28.5T280-800h380q25 0 42.5 17.5T720-740q0 25-17.5 42.5T660-680H431l184 171q13 12 13 29t-13 29L431-280h229q25 0 42.5 17.5T720-220q0 25-17.5 42.5T660-160H269q-12 0-20.5-8.5T240-189v-38q0-6 2-11.5t7-10.5l251-231Z"), fill = SolidColor(Color.Black))
@@ -98,12 +112,27 @@ object ObjectSymbols {
 
     /** Google Material Symbols Rounded, add_row_below: insert a row below the held one. */
     val AddRowBelow: ImageVector by lazy {
-        symbol("AddRowBelow", "M760-560v-240H200v240h560ZM200-160q-33 0-56.5-23.5T120-240v-560q0-33 23.5-56.5T200-880h560q33 0 56.5 23.5T840-800v560q0 33-23.5 56.5T760-160h-40q-17 0-28.5-11.5T680-200q0-17 11.5-28.5T720-240h40v-240H200v240h40q17 0 28.5 11.5T280-200q0 17-11.5 28.5T240-160h-40Zm251.5 68.5Q440-103 440-120v-40h-40q-17 0-28.5-11.5T360-200q0-17 11.5-28.5T400-240h40v-40q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280v40h40q17 0 28.5 11.5T600-200q0 17-11.5 28.5T560-160h-40v40q0 17-11.5 28.5T480-80q-17 0-28.5-11.5ZM480-480Zm0-80v80-80Zm0 0Z")
+        symbol("AddRowBelow", ADD_ROW_BELOW)
     }
 
     /** Google Material Symbols Rounded, add_column_right: insert a column right of the held one. */
     val AddColumnRight: ImageVector by lazy {
-        symbol("AddColumnRight", "M400-760H160v560h240v-560ZM160-120q-33 0-56.5-23.5T80-200v-560q0-33 23.5-56.5T160-840h560q33 0 56.5 23.5T800-760v40q0 17-11.5 28.5T760-680q-17 0-28.5-11.5T720-720v-40H480v560h240v-40q0-17 11.5-28.5T760-280q17 0 28.5 11.5T800-240v40q0 33-23.5 56.5T720-120H160Zm571.5-251.5Q720-383 720-400v-40h-40q-17 0-28.5-11.5T640-480q0-17 11.5-28.5T680-520h40v-40q0-17 11.5-28.5T760-600q17 0 28.5 11.5T800-560v40h40q17 0 28.5 11.5T880-480q0 17-11.5 28.5T840-440h-40v40q0 17-11.5 28.5T760-360q-17 0-28.5-11.5ZM480-480Zm-80 0h80-80Zm0 0Z")
+        symbol("AddColumnRight", ADD_COLUMN_RIGHT)
+    }
+
+    /** add_row_below turned over, which is Material Symbols' add_row_above: insert a row above. */
+    val AddRowAbove: ImageVector by lazy {
+        ImageVector.Builder("AddRowAbove", 24.dp, 24.dp, 960f, 960f).group(scaleY = -1f) {
+            addPath(addPathNodes(ADD_ROW_BELOW), fill = SolidColor(Color.Black))
+        }.build()
+    }
+
+    /** add_column_right mirrored, which is Material Symbols' add_column_left: insert a column to the left. */
+    val AddColumnLeft: ImageVector by lazy {
+        ImageVector.Builder("AddColumnLeft", 24.dp, 24.dp, 960f, 960f)
+            .group(scaleX = -1f, translationX = 960f, translationY = 960f) {
+                addPath(addPathNodes(ADD_COLUMN_RIGHT), fill = SolidColor(Color.Black))
+            }.build()
     }
 
     /** Google Material Symbols Rounded, remove: delete the held row or column, not the object. */
@@ -138,5 +167,7 @@ object ObjectSymbols {
         symbol("FormatColorFillBar", "M160 0q-33 0-56.5-23.5T80-80q0-33 23.5-56.5T160-160h640q33 0 56.5 23.5T880-80q0 33-23.5 56.5T800 0H160Z")
     }
 
+    private const val ADD_ROW_BELOW = "M760-560v-240H200v240h560ZM200-160q-33 0-56.5-23.5T120-240v-560q0-33 23.5-56.5T200-880h560q33 0 56.5 23.5T840-800v560q0 33-23.5 56.5T760-160h-40q-17 0-28.5-11.5T680-200q0-17 11.5-28.5T720-240h40v-240H200v240h40q17 0 28.5 11.5T280-200q0 17-11.5 28.5T240-160h-40Zm251.5 68.5Q440-103 440-120v-40h-40q-17 0-28.5-11.5T360-200q0-17 11.5-28.5T400-240h40v-40q0-17 11.5-28.5T480-320q17 0 28.5 11.5T520-280v40h40q17 0 28.5 11.5T600-200q0 17-11.5 28.5T560-160h-40v40q0 17-11.5 28.5T480-80q-17 0-28.5-11.5ZM480-480Zm0-80v80-80Zm0 0Z"
+    private const val ADD_COLUMN_RIGHT = "M400-760H160v560h240v-560ZM160-120q-33 0-56.5-23.5T80-200v-560q0-33 23.5-56.5T160-840h560q33 0 56.5 23.5T800-760v40q0 17-11.5 28.5T760-680q-17 0-28.5-11.5T720-720v-40H480v560h240v-40q0-17 11.5-28.5T760-280q17 0 28.5 11.5T800-240v40q0 33-23.5 56.5T720-120H160Zm571.5-251.5Q720-383 720-400v-40h-40q-17 0-28.5-11.5T640-480q0-17 11.5-28.5T680-520h40v-40q0-17 11.5-28.5T760-600q17 0 28.5 11.5T800-560v40h40q17 0 28.5 11.5T880-480q0 17-11.5 28.5T840-440h-40v40q0 17-11.5 28.5T760-360q-17 0-28.5-11.5ZM480-480Zm-80 0h80-80Zm0 0Z"
     private const val BACKGROUND_REPLACE ="M120-574v-85l181-181h85L120-574Zm0-196v-70h70l-70 70Zm527 67q-10-11-21.5-21.5T602-743l97-97h85L647-703ZM220-361l77-77q7 11 14.5 20t16.5 17q-28 7-56.5 17.5T220-361Zm480-197v-2q0-19-3-37t-9-35l152-152v86L700-558ZM436-776l65-64h85l-64 64q-11-2-21-3t-21-1q-11 0-22 1t-22 3ZM120-375v-85l144-144q-2 11-3 22t-1 22q0 11 1 21t3 20L120-375Zm709 83q-8-12-18.5-23T788-335l52-52v85l-11 10Zm-116-82q-7-3-14-5.5t-14-4.5q-9-3-17.5-6t-17.5-5l190-191v86L713-374Zm-233-26q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47Zm56.5-103.5Q560-527 560-560t-23.5-56.5Q513-640 480-640t-56.5 23.5Q400-593 400-560t23.5 56.5Q447-480 480-480t56.5-23.5ZM160-160v-31q0-34 17-63t47-44q51-26 115.5-44T480-360q76 0 140.5 18T736-298q30 15 47 44t17 63v31q0 17-11.5 28.5T760-120H200q-17 0-28.5-11.5T160-160Zm81-40h478q-2-9-7-15.5T699-226q-36-18-91.5-36T480-280q-72 0-127.5 18T261-226q-8 4-13 11t-7 15Zm239 0Zm0-360Z"
 }

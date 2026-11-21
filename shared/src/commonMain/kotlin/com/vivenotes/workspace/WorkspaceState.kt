@@ -27,10 +27,16 @@ import com.vivenotes.model.ink.InkPage
 import com.vivenotes.model.ink.LineType
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.seedSegments
+import com.vivenotes.model.ink.DEFAULT_SOLID_WALL_THICKNESS
+import com.vivenotes.model.ink.MIN_SOLID_WALL_THICKNESS
+import com.vivenotes.model.ink.MAX_SOLID_WALL_THICKNESS
 import com.vivenotes.model.ink.ShapeArm
 import com.vivenotes.model.ink.ShapeEnd
 import com.vivenotes.model.ink.withArm
 import com.vivenotes.model.ink.withEnd
+import com.vivenotes.model.ink.withVertex
+import com.vivenotes.model.ink.withAddedVertex
+import com.vivenotes.model.ink.withRemovedVertex
 import com.vivenotes.model.newId
 import com.vivenotes.richtext.RichTextBuffer
 import com.vivenotes.richtext.TextSelection
@@ -60,6 +66,8 @@ data class ShapeToolSettings(
     val borderArgb: Int = 0xFF000000.toInt(),
     val fillArgb: Int? = null,
     val colorFollowsTheme: Boolean = true,
+    /** Wall thickness as a percentage of the outer radius, for hollow solids. */
+    val wallThickness: Int = DEFAULT_SOLID_WALL_THICKNESS,
 ) {
     companion object {
         const val MIN_BORDER_WIDTH = 1
@@ -240,8 +248,15 @@ data class WorkspaceState(
 
     /** The focused text box as an editing buffer; null — and the text commands disabled — without one. */
     val richText: RichTextBuffer? by lazy(LazyThreadSafetyMode.PUBLICATION) {
-        focusedTextOutline?.let { RichTextBuffer(it.blocks, editorSelection, typingMarks) }
+        focusedTextOutline?.let { textBuffer(it.blocks, editorSelection, typingMarks) }
     }
+
+    /** [blocks] as an editing buffer that writes in this device's default font and size where nothing else decides one. */
+    internal fun textBuffer(
+        blocks: List<Block>,
+        selection: TextSelection = TextSelection(0),
+        typingMarks: Set<Mark> = emptySet(),
+    ): RichTextBuffer = RichTextBuffer(blocks, selection, typingMarks, defaultMarks = editorDefaults.textMarks())
 
     val fontFamilyChoice: String get() = if (richText != null)
         selectedTextMarks.filterIsInstance<Mark.FontFamily>().firstOrNull()?.name ?: "sans-serif"
@@ -261,12 +276,25 @@ data class WorkspaceState(
         else if (richText != null) setSelectedMark(Mark.FontSize(size))
         else copy(nextFontSize = size)
 
-    fun setEditorDefaults(defaults: EditorDefaults): WorkspaceState =
-        copy(editorDefaults = defaults.normalized())
+    /**
+     * New defaults take effect at once, in the box being edited too: a caret with no text to write
+     * like (an empty box or paragraph) was going to write in the old default, and writes in the new
+     * one now. A font or size chosen for it, which differs from the old default, stays.
+     */
+    fun setEditorDefaults(defaults: EditorDefaults): WorkspaceState {
+        val next = copy(editorDefaults = defaults.normalized())
+        val caret = richText?.takeIf { it.selection.collapsed && it.currentBlock.editorText.isEmpty() }
+            ?: return next
+        val old = editorDefaults.textMarks()
+        val new = next.editorDefaults.textMarks()
+        return next.copy(typingMarks = caret.typingMarks.mapTo(mutableSetOf()) { mark ->
+            if (mark in old) new.firstOrNull { it::class == mark::class } ?: mark else mark
+        })
+    }
 
     fun richTextFor(id: String): RichTextBuffer? =
         selectedPage?.document?.textContainer(id)?.let {
-                RichTextBuffer(it.blocks, if (id == focusedTextOutlineId) editorSelection else TextSelection(0),
+                textBuffer(it.blocks, if (id == focusedTextOutlineId) editorSelection else TextSelection(0),
                     if (id == focusedTextOutlineId) typingMarks else emptySet())
             }
 
@@ -385,6 +413,20 @@ data class WorkspaceState(
             is TableEdit.RowMinHeight -> edit.recordHistory
             else -> true
         }
+        val edited = applyTableEdit(edit, recordHistory)
+        // The cell being typed in went with its row or column: the caret takes the cell now in its place.
+        val focused = focusedTextOutlineId ?: return edited
+        if (edited.selectedPage?.document?.textContainer(focused) != null) return edited
+        val (row, column) = editedTable(focused)?.locate(focused) ?: return edited
+        val left = edited.copy(focusedTextOutlineId = null, editorSelection = TextSelection(0), wordSelections = null,
+            typingMarks = emptySet(), editorComposition = null, typingRun = null)
+        val table = left.selectedPage?.document?.outlines?.firstOrNull { it.id == edit.tableId } as? Outline.Table
+        val heir = table?.rows?.getOrNull(row.coerceAtMost(table.rowCount - 1))?.cells
+            ?.getOrNull(column.coerceAtMost(table.columnCount - 1))
+        return if (heir == null) left else left.focusTextBox(heir.id)
+    }
+
+    private fun applyTableEdit(edit: TableEdit, recordHistory: Boolean): WorkspaceState {
         return editOutlines(recordHistory) { outlines -> outlines.map { outline ->
             if (outline !is Outline.Table || outline.id != edit.tableId) outline else when (edit) {
                 is TableEdit.InsertRow -> outline.withRowInserted(edit.at)
@@ -447,7 +489,7 @@ data class WorkspaceState(
 
     fun selectInk(selection: com.vivenotes.model.ink.InkSelection): WorkspaceState =
         if (selection.page !== selectedPage?.ink || inkTool != null || textToolArmed || shapeToolArmed) this
-        else clearCanvasFocus().copy(selectedInk = selection)
+        else clearCanvasFocus().copy(selectedInk = selection).expandSelectionGroups()
 
     fun applyInkSelectionChange(change: com.vivenotes.model.ink.InkSelectionChange, deleteOutlines: Boolean = false,
                                 recolorOutlinesArgb: Int? = null, recolorFollowsTheme: Boolean = false): WorkspaceState {
@@ -541,6 +583,7 @@ data class WorkspaceState(
     fun setShapeSettings(settings: ShapeToolSettings): WorkspaceState = copy(shapeSettings = settings.copy(
         borderWidth = settings.borderWidth.coerceIn(ShapeToolSettings.MIN_BORDER_WIDTH,
             ShapeToolSettings.MAX_BORDER_WIDTH),
+        wallThickness = settings.wallThickness.coerceIn(MIN_SOLID_WALL_THICKNESS, MAX_SOLID_WALL_THICKNESS),
     ))
 
     /** A tap uses the Android default box; a drag preserves its direction for lines and arrows. */
@@ -551,11 +594,13 @@ data class WorkspaceState(
         val settings = shapeSettings
         val shape = Outline.Shape(
             id = newId(), kind = settings.kind,
-            segments = seedSegments(settings.kind, startX, startY, endX, endY, ::newId),
+            segments = seedSegments(settings.kind, startX, startY, endX, endY,
+                wallThickness = settings.wallThickness, nextId = ::newId),
             borderArgb = settings.borderArgb, borderFollowsTheme = settings.colorFollowsTheme,
             borderWidth = settings.borderWidth.toFloat(), lineType = settings.lineType,
             fillArgb = settings.fillArgb.takeUnless {
-                settings.kind == ShapeKind.Line || settings.kind == ShapeKind.Arrow || settings.kind == ShapeKind.L
+                settings.kind == ShapeKind.Line || settings.kind == ShapeKind.Arrow || settings.kind == ShapeKind.L ||
+                    settings.kind == ShapeKind.Curve
             },
         ).withRecomputedBounds()
         return editOutlines { it + shape }.copy(selectedObjectIds = setOf(shape.id),
@@ -568,7 +613,7 @@ data class WorkspaceState(
             listOf(line.startX, line.startY, line.endX, line.endY).any { !it.isFinite() || it < 0f }) return this
         val settings = pen.normalized()
         val shape = Outline.Shape(id = newId(), kind = ShapeKind.Line,
-            segments = seedSegments(ShapeKind.Line, line.startX, line.startY, line.endX, line.endY, ::newId),
+            segments = seedSegments(ShapeKind.Line, line.startX, line.startY, line.endX, line.endY, nextId = ::newId),
             borderArgb = settings.colorArgb, borderFollowsTheme = settings.colorFollowsTheme,
             borderWidth = settings.sizeDp, lineType = settings.lineType).withRecomputedBounds()
         return editOutlines { it + shape }
@@ -586,7 +631,7 @@ data class WorkspaceState(
 
     fun setSelectedShapeFill(argb: Int?): WorkspaceState = editOutlines { outlines ->
         outlines.map { if (it.id in selectedObjectIds && it is Outline.Shape &&
-            it.kind !in setOf(ShapeKind.Line, ShapeKind.Arrow, ShapeKind.L)) it.copy(fillArgb = argb) else it }
+            it.kind !in setOf(ShapeKind.Line, ShapeKind.Arrow, ShapeKind.L, ShapeKind.Curve)) it.copy(fillArgb = argb) else it }
     }
 
     fun moveShapeEnd(id: String, atEnd: Boolean, x: Float, y: Float,
@@ -603,13 +648,33 @@ data class WorkspaceState(
                 outline.withArm(arm, along) else outline
         } }
 
+    fun moveShapeVertex(id: String, index: Int, x: Float, y: Float,
+                        recordHistory: Boolean = true): WorkspaceState =
+        editOutlines(recordHistory) { outlines -> outlines.map { outline ->
+            if (outline.id == id && outline is Outline.Shape && outline.lockGroup == null)
+                outline.withVertex(index, x, y) else outline
+        } }
+
+    fun addShapeVertex(id: String, segmentId: String): WorkspaceState =
+        editOutlines { outlines -> outlines.map { outline ->
+            if (outline.id == id && outline is Outline.Shape && outline.lockGroup == null)
+                outline.withAddedVertex(segmentId, ::newId) else outline
+        } }
+
+    fun removeShapeVertex(id: String, segmentId: String, atEnd: Boolean): WorkspaceState =
+        editOutlines { outlines -> outlines.map { outline ->
+            if (outline.id == id && outline is Outline.Shape && outline.lockGroup == null)
+                outline.withRemovedVertex(segmentId, atEnd) else outline
+        } }
+
     fun focusTextBox(id: String): WorkspaceState {
         if (selectedPage?.document?.textContainer(id) == null) return this
         val next = if (id == focusedTextOutlineId) this else discardEmptyFocusedTextBox()
         val outline = next.selectedPage?.document?.textContainer(id)
-        val marks = if (outline?.blocks?.all { it.runs.isEmpty() } == true)
-            editorDefaults.textMarks(nextFontFamily ?: editorDefaults.fontFamily,
-                nextFontSize ?: editorDefaults.fontSize) else emptySet()
+        // The caret starts at the top: an empty box writes in the font and size armed for it, or the
+        // defaults; one with text, in that text's.
+        val marks = outline?.let { textBuffer(it.blocks, typingMarks = armedTextMarks).select(TextSelection(0)).typingMarks }
+            .orEmpty()
         return next.copy(focusedTextOutlineId = id, selectedTextOutlineIds = emptySet(),
             selectedObjectIds = emptySet(), selectedInk = null,
             editorSelection = TextSelection(0), wordSelections = null, typingMarks = marks, editorComposition = null,
@@ -644,11 +709,14 @@ data class WorkspaceState(
             outlines.filterNot { it is Outline.Text && it.isUnwritten() } + outline
         }.copy(focusedTextOutlineId = outline.id, selectedTextOutlineIds = emptySet(),
             editorSelection = TextSelection(0), wordSelections = null,
-            typingMarks = editorDefaults.textMarks(nextFontFamily ?: editorDefaults.fontFamily,
-                nextFontSize ?: editorDefaults.fontSize), editorComposition = null,
+            typingMarks = armedTextMarks, editorComposition = null,
             nextFontFamily = null, nextFontSize = null)
             .discardEmptyTextHistory(removedIds)
     }
+
+    /** What the next new text box writes in: a font and size chosen with no box open, or the defaults. */
+    private val armedTextMarks: Set<Mark>
+        get() = editorDefaults.textMarks(nextFontFamily ?: editorDefaults.fontFamily, nextFontSize ?: editorDefaults.fontSize)
 
     /** A provisional box must not return through Undo after it was abandoned. */
     private fun discardEmptyTextHistory(ids: Set<String>): WorkspaceState {
@@ -716,7 +784,9 @@ data class WorkspaceState(
         val page = editablePage?.takeIf { it.id == pageId } ?: return this
         if (outlines.isEmpty() || !x.isFinite() || !y.isFinite()) return this
         val top = y.coerceAtLeast(page.document.style.titleFloor)
-        val pasted = outlines.map { it.duplicateAt(x.coerceAtLeast(0f) + it.x, top + it.y) }
+        val groups = mutableMapOf<String, String>()
+        val pasted = outlines.map { it.duplicateAt(x.coerceAtLeast(0f) + it.x, top + it.y)
+            .withGroup(it.groupId?.let { group -> groups.getOrPut(group, ::newId) }) }
         return selectPointer().editOutlines { it + pasted }.copy(
             focusedTextOutlineId = null,
             selectedTextOutlineIds = pasted.filterIsInstance<Outline.Text>().map { it.id }.toSet(),
@@ -732,11 +802,12 @@ data class WorkspaceState(
         val sources = canvasClipboard.outlines
         val left = (sources.map { it.x } + listOfNotNull(canvasClipboard.ink?.bounds?.left)).min()
         val top = (sources.map { it.y } + listOfNotNull(canvasClipboard.ink?.bounds?.top)).min()
+        val groups = mutableMapOf<String, String>()
         val pasted = sources.map { it.duplicateAt(it.x - left + x.coerceAtLeast(0f),
-            it.y - top + y.coerceAtLeast(0f)) }
+            it.y - top + y.coerceAtLeast(0f)).withGroup(it.groupId?.let { group -> groups.getOrPut(group, ::newId) }) }
         canvasClipboard.ink?.let { clipboard ->
-            val change = clipboard.paste(page.ink ?: InkPage(page.id, emptyList()),
-                x.coerceAtLeast(0f) - left, y.coerceAtLeast(0f) - top) ?: return this
+            val change = clipboard.pasteGrouped(page.ink ?: InkPage(page.id, emptyList()),
+                x.coerceAtLeast(0f) - left, y.coerceAtLeast(0f) - top, groups) ?: return this
             val document = page.document.copy(outlines = page.document.outlines + pasted)
             val history = InkHistoryChange(change.before, change.after, change.undo, change.redo,
                 document.takeIf { it != page.document })
@@ -865,7 +936,7 @@ data class WorkspaceState(
         val blocks = if (before) change.before else change.after
         val selection = if (before) change.selectionBefore else change.selectionAfter
         val focused = if (focusedTextOutlineId == change.outlineId) this else focusTextBox(change.outlineId)
-        val buffer = RichTextBuffer(blocks, typingMarks = focused.typingMarks).select(selection)
+        val buffer = textBuffer(blocks, typingMarks = focused.typingMarks).select(selection)
         return focused.updatePage(selectedPageId) { page -> page.withDocument(page.document.withTextBlocks(
             changes.associate { it.outlineId to if (before) it.before else it.after }))
         }.copy(editorSelection = buffer.selection, typingMarks = buffer.typingMarks, editorComposition = null,
@@ -894,12 +965,13 @@ data class WorkspaceState(
 
     /** Tapping one member of a locked group holds the whole group. */
     fun selectObject(id: String): WorkspaceState {
-        val objects = selectedPage?.document?.outlines?.filter { it.isPrimeObject() } ?: return this
+        val objects = selectedPage?.document?.outlines?.filter { it.isPrimeObject() || it is Outline.Text && it.groupId != null } ?: return this
         val tapped = objects.firstOrNull { it.id == id } ?: return this
         val ids = if (tapped.lockGroup == null) setOf(id) else
             objects.filter { it.lockGroup == tapped.lockGroup }.map { it.id }.toSet()
-        return discardEmptyFocusedTextBox().copy(selectedObjectIds = ids, selectedInk = null,
-            selectedTextOutlineIds = emptySet(), focusedTextOutlineId = null, wordSelections = null)
+        return discardEmptyFocusedTextBox().copy(selectedObjectIds = objects.filter { it.isPrimeObject() && it.id in ids }.map { it.id }.toSet(),
+            selectedInk = null, selectedTextOutlineIds = objects.filterIsInstance<Outline.Text>().filter { it.id in ids }.map { it.id }.toSet(),
+            focusedTextOutlineId = null, wordSelections = null).expandSelectionGroups()
     }
 
     /** Mixed lassos prefer movable outlines; a loop containing only locks selects those groups. */
@@ -921,7 +993,7 @@ data class WorkspaceState(
             objects.filter { it.lockGroup in groups }.map { it.id }.toSet()
         }
         return cleaned.copy(selectedObjectIds = ids, selectedTextOutlineIds = textIds, selectedInk = inkSelection,
-            focusedTextOutlineId = null)
+            focusedTextOutlineId = null).expandSelectionGroups()
     }
 
     fun selectObjectsInLasso(path: List<InkSample>, measuredHeights: Map<String, Float> = emptyMap()): WorkspaceState {
@@ -943,7 +1015,7 @@ data class WorkspaceState(
             val groups = objects.mapNotNull { it.lockGroup }.toSet()
             outlines.filter { it.isPrimeObject() && it.lockGroup in groups }.map { it.id }.toSet()
         }
-        return cleaned.copy(selectedObjectIds = ids, selectedTextOutlineIds = texts, selectedInk = selected)
+        return cleaned.copy(selectedObjectIds = ids, selectedTextOutlineIds = texts, selectedInk = selected).expandSelectionGroups()
     }
 
     val selectedPrimeObjects: List<Outline> get() = selectedPage?.document?.outlines.orEmpty()
@@ -1149,7 +1221,7 @@ data class WorkspaceState(
         editTextSelections { it.replace(text) }
 
     val selectedText: String
-        get() = orderedTextRanges().mapNotNull { target ->
+        get() = selectedCellsText() ?: orderedTextRanges().mapNotNull { target ->
             selectedPage?.document?.textIndex?.get(target.containerId)?.let {
                 val buffer = RichTextBuffer(it.blocks)
                 val range = target.range.clamped(buffer.text.length)

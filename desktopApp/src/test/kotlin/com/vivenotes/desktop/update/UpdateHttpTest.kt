@@ -36,7 +36,7 @@ class UpdateHttpTest {
     private val base = "http://127.0.0.1:${server.address.port}"
     private val requests = ConcurrentHashMap<String, HttpExchange>()
     private val installer = Random(7).nextBytes(300_000)
-    private val installerName = "ViveNotes-0.2.0-x64.msi"
+    private val installerName = INSTALLER_NAME
 
     @AfterTest
     fun stop() = server.stop(0)
@@ -71,7 +71,8 @@ class UpdateHttpTest {
         val directory = temp.newFolder("updates")
         val progress = mutableListOf<Long>()
 
-        val msi = VerifiedUpdateDownloader("ViveNotes/0.1.0 (Windows)").download(release, directory) { progress += it }
+        val msi = VerifiedUpdateDownloader("ViveNotes/0.1.0 (Windows)")
+            .download(release, java.io.File(directory, installerName), seed = null) { progress += it.bytes }
 
         assertEquals(java.io.File(directory, installerName), msi)
         assertContentEquals(installer, msi.readBytes())
@@ -89,7 +90,7 @@ class UpdateHttpTest {
         val directory = temp.newFolder("updates")
 
         val failure = assertFailsWith<IOException> {
-            VerifiedUpdateDownloader("test").download(release, directory) {}
+            VerifiedUpdateDownloader("test").download(release, java.io.File(directory, installerName), null) {}
         }
 
         assertEquals("$installerName failed verification", failure.message)
@@ -101,11 +102,11 @@ class UpdateHttpTest {
         val directory = temp.newFolder("updates")
         val longer = assertNotNull(serveRelease(served = installer + byteArrayOf(1)).let { feed().latest() })
         assertEquals("$installerName is larger than expected",
-            assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(longer, directory) {} }.message)
+            assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(longer, java.io.File(directory, installerName), null) {} }.message)
 
         val shorter = assertNotNull(serveRelease(served = installer.copyOf(installer.size - 1)).let { feed().latest() })
         assertEquals("$installerName is incomplete",
-            assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(shorter, directory) {} }.message)
+            assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(shorter, java.io.File(directory, installerName), null) {} }.message)
         assertEquals(emptyList(), directory.list()!!.toList())
     }
 
@@ -114,7 +115,7 @@ class UpdateHttpTest {
         val release = assertNotNull(serveRelease(checksum = "${sha256(installer)}  ViveNotes-0.1.0-x64.msi\r\n").let { feed().latest() })
         val directory = temp.newFolder("updates")
 
-        val failure = assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(release, directory) {} }
+        val failure = assertFailsWith<IOException> { VerifiedUpdateDownloader("test").download(release, java.io.File(directory, installerName), null) {} }
 
         assertEquals("The checksum for $installerName could not be read.", failure.message)
         assertTrue(!requests.containsKey("/storage/$installerName"), "Nothing is downloaded without a checksum")
@@ -126,9 +127,9 @@ class UpdateHttpTest {
             ReleaseAsset(installerName, URI("https://github.com/x/$installerName"), 3),
             ReleaseAsset("$installerName.sha256", URI("https://github.com/x/$installerName.sha256"), 92))
         // What HttpURLConnection reports after following a redirect to plain HTTP elsewhere.
-        val downloader = VerifiedUpdateDownloader("test") { _ -> FakeConnection(URL("http://example.com/checksum"), "x") }
+        val downloader = VerifiedUpdateDownloader("test", openConnection = { _ -> FakeConnection(URL("http://example.com/checksum"), "x") })
 
-        val failure = assertFailsWith<IOException> { downloader.download(release, temp.newFolder("updates")) {} }
+        val failure = assertFailsWith<IOException> { downloader.download(release, java.io.File(temp.newFolder("updates"), installerName), null) {} }
 
         assertEquals("$installerName.sha256 failed verification", failure.message)
     }
@@ -136,13 +137,13 @@ class UpdateHttpTest {
     @Test
     fun checksumFilesInTheFormsToolsWriteAreRead() {
         val digest = "c7634c943aecf4822419592af2c258113c4412c5d80ba8f5fd58b33dc657f114"
-        assertEquals(digest, parseChecksum("$digest  ViveNotes-0.2.0-x64.msi\r\n", "ViveNotes-0.2.0-x64.msi"))
-        assertEquals(digest, parseChecksum("${digest.uppercase()} *ViveNotes-0.2.0-x64.msi", "ViveNotes-0.2.0-x64.msi"))
-        assertEquals(digest, parseChecksum("$digest\n", "ViveNotes-0.2.0-x64.msi"))
-        assertEquals(digest, parseChecksum("${"0".repeat(64)}  other.msi\n$digest  ViveNotes-0.2.0-x64.msi", "ViveNotes-0.2.0-x64.msi"))
-        assertNull(parseChecksum("${digest.take(63)}  ViveNotes-0.2.0-x64.msi", "ViveNotes-0.2.0-x64.msi"))
-        assertNull(parseChecksum("<html>Not found</html>", "ViveNotes-0.2.0-x64.msi"))
-        assertNull(parseChecksum("", "ViveNotes-0.2.0-x64.msi"))
+        assertEquals(digest, parseChecksum("$digest  ViveNotes-x64.msi\r\n", "ViveNotes-x64.msi"))
+        assertEquals(digest, parseChecksum("${digest.uppercase()} *ViveNotes-x64.msi", "ViveNotes-x64.msi"))
+        assertEquals(digest, parseChecksum("$digest\n", "ViveNotes-x64.msi"))
+        assertEquals(digest, parseChecksum("${"0".repeat(64)}  other.msi\n$digest  ViveNotes-x64.msi", "ViveNotes-x64.msi"))
+        assertNull(parseChecksum("${digest.take(63)}  ViveNotes-x64.msi", "ViveNotes-x64.msi"))
+        assertNull(parseChecksum("<html>Not found</html>", "ViveNotes-x64.msi"))
+        assertNull(parseChecksum("", "ViveNotes-x64.msi"))
     }
 
     private fun feed() = GitHubReleaseFeed(URI("$base/repos/latest"), "ViveNotes/0.1.0 (Windows)")
@@ -155,7 +156,7 @@ class UpdateHttpTest {
         val fixture = checkNotNull(javaClass.getResource("/update/github-release-latest.json")).readText()
             .replace("https://github.com/CrownByte0b/viveNotes-multiplataform/releases/download", "$base/releases/download")
             .replace("\"size\": 229876426", "\"size\": ${installer.size}")
-            .replace("\"size\": 92", "\"size\": ${checksum.length}")
+            .replace("\"size\": 85", "\"size\": ${checksum.length}")
         respond("/repos/latest", 200, fixture.toByteArray())
         for ((name, bytes) in listOf(installerName to served, "$installerName.sha256" to checksum.toByteArray())) {
             server.removeContextQuietly("/releases/download/v0.2.0/$name")

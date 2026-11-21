@@ -13,7 +13,9 @@ if (-not $Version) {
     $projectVersion = (Select-String -Path "$root/gradle.properties" -Pattern '^version=(.+)$').Matches.Groups[1].Value
     # As nativePackageVersion in desktopApp/build.gradle.kts: a development version installs under
     # its numeric part and the app still reports the full version. An explicit -Version stays strict.
-    $Version = ($projectVersion -split '[-+]', 2)[0]
+    # Suffixes may start with '-', '+' or '.' (1.2.1-dev.0, 1.2.1+build, 1.2.1.dev0).
+    if ($projectVersion -match '^([0-9]+\.[0-9]+\.[0-9]+)(?:[.+-].*)?$') { $Version = $Matches[1] }
+    else { $Version = $projectVersion }
 }
 if ($Version -notmatch '^(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,2})\.(0|[1-9][0-9]{0,4})$') {
     throw 'MSI versions must be MAJOR.MINOR.BUILD (numeric, without a prerelease suffix).'
@@ -36,7 +38,9 @@ try {
     $source = Join-Path $root "desktopApp/build/compose/binaries/main-release/msi/Vive Notes-$Version.msi"
     if (-not (Test-Path $source)) { throw "MSI output is missing: $source" }
     $output = New-Item -ItemType Directory -Force "$root/desktopApp/build/windows"
-    $msi = Join-Path $output.FullName "ViveNotes-$Version-x64.msi"
+    # One name for every version: releases/latest/download/ViveNotes-x64.msi is always the newest
+    # installer, and the installed app's updater asks a release for this name.
+    $msi = Join-Path $output.FullName "ViveNotes-x64.msi"
     Copy-Item $source $msi -Force
     $hash = (Get-FileHash $msi -Algorithm SHA256).Hash.ToLowerInvariant()
     "$hash  $([IO.Path]::GetFileName($msi))" | Set-Content "$msi.sha256" -Encoding ascii

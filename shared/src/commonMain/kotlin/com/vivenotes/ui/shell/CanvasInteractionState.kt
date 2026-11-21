@@ -13,6 +13,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntSize
 import com.vivenotes.model.SpaceCut
+import com.vivenotes.model.Outline
+import com.vivenotes.ui.canvas.CurveVertexEdit
 import com.vivenotes.model.ink.Ruler
 import com.vivenotes.ui.canvas.TextMenuRequest
 import com.vivenotes.ui.ribbon.draw.TableAxis
@@ -26,6 +28,10 @@ internal class CanvasInteractionState(
     val viewportPxState: MutableState<IntSize>,
     val pendingViewportState: MutableState<CanvasViewport?>,
     val pastePointState: MutableState<Offset?>,
+    /** Where the prime object right-click menu is open, in page dp; null while it is closed. */
+    val objectMenuState: MutableState<Offset?>,
+    /** The row and column of the table cell that menu was opened on, when it was opened on one. */
+    val objectMenuCellState: MutableState<Pair<Int, Int>?>,
     val rulerPlacementState: MutableState<Ruler?>,
     val lassoPath: LassoPathBuffer,
     val lassoState: MutableState<Pair<Offset, Offset>?>,
@@ -43,12 +49,16 @@ internal class CanvasInteractionState(
     val textMenuState: MutableState<TextMenuRequest?>,
     val heldTableAxisState: MutableState<TableAxis?>,
     val reachedXState: MutableIntState,
-    val reachedYState: MutableIntState
+    val reachedYState: MutableIntState,
+    val curveVertexEditState: MutableState<CurveVertexEdit?>,
+    val curveVertexPreviewState: MutableState<Outline.Shape?>,
 ) {
     var searchInkBounds by searchInkBoundsState
     var viewportPx by viewportPxState
     var pendingViewport by pendingViewportState
     var pastePoint by pastePointState
+    var objectMenu by objectMenuState
+    var objectMenuCell by objectMenuCellState
     var rulerPlacement by rulerPlacementState
     var lasso by lassoState
     var inkDragOffset by inkDragOffsetState
@@ -66,6 +76,8 @@ internal class CanvasInteractionState(
     var heldTableAxis by heldTableAxisState
     var reachedX by reachedXState
     var reachedY by reachedYState
+    var curveVertexEdit by curveVertexEditState
+    var curveVertexPreview by curveVertexPreviewState
 }
 
 @Composable
@@ -74,6 +86,8 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
     val viewportPxState = remember { mutableStateOf(IntSize.Zero) }
     val pendingViewportState = remember(page?.id) { mutableStateOf<CanvasViewport?>(null) }
     val pastePointState = remember(page?.id) { mutableStateOf<Offset?>(null) }
+    val objectMenuState = remember(page?.id) { mutableStateOf<Offset?>(null) }
+    val objectMenuCellState = remember(page?.id) { mutableStateOf<Pair<Int, Int>?>(null) }
     val rulerPlacementState = remember(page?.id, state.rulerVisible) { mutableStateOf<Ruler?>(null) }
     val lassoPathState = remember(page?.id, state.objectLassoArmed, zoom) { LassoPathBuffer() }
     val lassoState = remember(page?.id) { mutableStateOf<Pair<Offset, Offset>?>(null) }
@@ -92,11 +106,19 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
     val heldTableAxisState = remember(page?.id) { mutableStateOf<TableAxis?>(null) }
     val reachedXState = remember(page?.id) { mutableIntStateOf(0) }
     val reachedYState = remember(page?.id) { mutableIntStateOf(0) }
+    val curveVertexEditState = remember(page?.id, state.selectedObjectIds, state.selectedTextOutlineIds,
+        state.selectedInk, state.inkTool, state.objectLassoArmed, state.shapeToolArmed, state.textToolArmed,
+        state.drawPlacement, state.selectedObjectsLocked) { mutableStateOf<CurveVertexEdit?>(null) }
+    val curveVertexPreviewState = remember(page?.id, state.selectedObjectIds, state.selectedTextOutlineIds,
+        state.selectedInk, state.inkTool, state.objectLassoArmed, state.shapeToolArmed, state.textToolArmed,
+        state.drawPlacement, state.selectedObjectsLocked, zoom) { mutableStateOf<Outline.Shape?>(null) }
     return CanvasInteractionState(
         searchInkBoundsState,
         viewportPxState,
         pendingViewportState,
         pastePointState,
+        objectMenuState,
+        objectMenuCellState,
         rulerPlacementState,
         lassoPathState,
         lassoState,
@@ -115,5 +137,7 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
         heldTableAxisState,
         reachedXState,
         reachedYState,
+        curveVertexEditState,
+        curveVertexPreviewState,
     )
 }

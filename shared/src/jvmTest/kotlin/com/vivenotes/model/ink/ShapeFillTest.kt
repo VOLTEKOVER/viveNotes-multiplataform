@@ -49,7 +49,7 @@ class ShapeFillTest {
 
     @Test
     fun `an open shape has no inside`() {
-        listOf(ShapeKind.Line, ShapeKind.Arrow, ShapeKind.L).forEach { kind ->
+        listOf(ShapeKind.Line, ShapeKind.Arrow, ShapeKind.Curve, ShapeKind.L).forEach { kind ->
             val shape = shape(kind)
             assertFalse("$kind offered a fill it has no room for", shape.canFill)
             assertTrue("$kind produced a region anyway", shape.fillRegion().isEmpty())
@@ -67,8 +67,8 @@ class ShapeFillTest {
     }
 
     @Test
-    fun `a solid fills its silhouette rather than its edges`() {
-        ShapeKind.entries.filter(ShapeKind::isSolid).forEach { kind ->
+    fun `a convex solid fills its silhouette rather than its edges`() {
+        ShapeKind.entries.filter { it.isSolid && !it.hasWallThickness }.forEach { kind ->
             val shape = shape(kind)
             assertTrue("$kind cannot be filled", shape.canFill)
             val region = shape.fillRegion().single()
