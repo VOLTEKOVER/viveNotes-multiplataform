@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vivenotes.ui.icons.DrawSymbols
 import com.vivenotes.ui.icons.SettingsSymbols
 import com.vivenotes.ui.icons.aboutGlyph
 import com.vivenotes.ui.icons.hardwareGlyph
@@ -50,7 +51,8 @@ internal const val LINK_PREVIEWS_TAG = "settings-link-previews"
 @Composable
 internal fun SettingsRibbon(onInterface: () -> Unit, hardwareOpen: Boolean, onHardware: () -> Unit,
     linkPreviews: Boolean, onLinkPreviewsChange: (Boolean) -> Unit, onAbout: () -> Unit,
-    modelsAvailable: Boolean = false, modelsOpen: Boolean = false, onModels: () -> Unit = {}) {
+    modelsAvailable: Boolean = false, modelsOpen: Boolean = false, onModels: () -> Unit = {},
+    recognitionOpen: Boolean = false, onRecognition: () -> Unit = {}) {
     Box(
         modifier = Modifier.fillMaxWidth().height(46.dp)
             .background(ribbonStyle.background)
@@ -69,6 +71,8 @@ internal fun SettingsRibbon(onInterface: () -> Unit, hardwareOpen: Boolean, onHa
                 onClick = { onLinkPreviewsChange(!linkPreviews) })
             SettingsTab(Strings.hardware, icon = ::hardwareGlyph,
                 tag = HardwareTags.Open, active = hardwareOpen, onClick = onHardware)
+            SettingsTab(Strings.shape_recognition, icon = { _, _ -> DrawSymbols.Shape }, monochrome = true,
+                tag = RecognitionTags.Open, active = recognitionOpen, onClick = onRecognition)
             SettingsTab(Strings.models, icon = ::integratedGlyph, tag = ModelsTags.Open, active = modelsOpen,
                 enabled = modelsAvailable, onClick = onModels)
             SettingsTab(Strings.about, icon = ::aboutGlyph, tag = AboutTags.Open, onClick = onAbout)

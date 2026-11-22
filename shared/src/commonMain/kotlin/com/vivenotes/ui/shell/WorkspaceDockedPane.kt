@@ -19,6 +19,7 @@ import com.vivenotes.ui.ribbon.draw.*
 import com.vivenotes.ui.ribbon.file.FilePaneContent
 import com.vivenotes.ui.ribbon.settings.HardwarePane
 import com.vivenotes.ui.ribbon.settings.ModelsPane
+import com.vivenotes.ui.ribbon.settings.RecognitionPane
 import com.vivenotes.ui.ribbon.view.PaperSizePane
 import com.vivenotes.ui.ribbon.view.ViewActions
 import com.vivenotes.ui.ribbon.view.viewActions
@@ -29,6 +30,7 @@ import com.vivenotes.workspace.EditorDefaults
 import com.vivenotes.workspace.FileActions
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.KeyBindings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.WorkspaceState
 
@@ -44,6 +46,8 @@ internal fun WorkspaceDockedPane(
     onEditorDefaultsChange: (EditorDefaults) -> Unit,
     input: InputSettings,
     onInputChange: (InputSettings) -> Unit,
+    recognitionSettings: ShapeRecognitionSettings,
+    onRecognitionSettingsChange: (ShapeRecognitionSettings) -> Unit,
     bindings: KeyBindings,
     onEditShortcut: (ShortcutAction) -> Unit,
     onEditPenKey: (Int) -> Unit,
@@ -108,6 +112,14 @@ internal fun WorkspaceDockedPane(
                 onEditPenKey = onEditPenKey,
                 onReset = { onBindingsChange(bindings.reset(it)) },
                 onResetAll = onResetShortcuts,
+                onClose = onClosePane,
+            )
+            DockedPane.Recognition -> RecognitionPane(
+                settings = recognitionSettings,
+                onSettingsChange = { next ->
+                    onStateChange { current -> current.setRecognitionSettings(next) }
+                    onRecognitionSettingsChange(next.normalized())
+                },
                 onClose = onClosePane,
             )
             DockedPane.Search -> search?.let { service ->

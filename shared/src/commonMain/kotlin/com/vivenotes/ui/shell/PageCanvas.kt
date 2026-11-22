@@ -78,6 +78,7 @@ import com.vivenotes.model.ink.LineType
 import com.vivenotes.model.ink.Ruler
 import com.vivenotes.model.ink.RulerPoint
 import com.vivenotes.model.ink.ShapeArm
+import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.vertexNear
 import com.vivenotes.ui.canvas.CurveVertexMode
@@ -193,6 +194,8 @@ internal fun PageCanvas(
     onPreparedPaste: (WorkspaceState, WorkspaceState) -> Unit,
     onCreateShape: (Float, Float, Float, Float) -> Unit,
     onStraightenStroke: (StraightLine, InkPenSettings) -> Unit = { _, _ -> },
+    onShapeRecognized: (ShapeCandidate, InkPenSettings) -> Unit = { _, _ -> },
+    onForceShapeRecognition: (InkSelection) -> Unit = {},
     onCreateTextBox: (Float, Float) -> Unit,
     onPlaceEmptyTextBox: (String, Float, Float) -> Unit,
     onMoveTextBox: (String, Float, Float, Boolean) -> Unit,
@@ -673,6 +676,10 @@ internal fun PageCanvas(
 
     /** The selected objects' toolbar, which sits just above their frame. */
     fun hitsSelectionToolbar(point: Offset, snapshot: WorkspaceState, reach: Float): Boolean {
+        // With the lasso armed the user is drawing a marquee. The toolkit's rectangle can grow wide
+        // (a captioned force button) and overlap where the lasso starts, but its buttons still take
+        // their own clicks; the canvas must not swallow the gesture just because the rectangle grew.
+        if (snapshot.objectLassoArmed) return false
         if (snapshot.selectedInk != null) return interaction.inkToolkitBoundsInView?.contains(Offset(
             point.x * zoomState.value * density.density - horizontalScroll.value,
             point.y * zoomState.value * density.density - verticalScroll.value)) == true
@@ -1005,7 +1012,8 @@ internal fun PageCanvas(
                     val inkEnabled = page.editable && page.inkReady && !state.notebookTransfer.running && !state.filePane.busy
                     InkLayer(page.ink, canvasSize, shapeInk, visibleWindow, page.id,
                         state.inkTool.takeIf { inkEnabled && it != InkTool.Laser }, page.document.style.titleFloor, onInkEdit, zoom,
-                        state.eraserMode, state.inkSettings, state.selectedInk, interaction.inkDragOffset, state.activePenIndex, ruler, onStraightenStroke)
+                        state.eraserMode, state.inkSettings, state.selectedInk, interaction.inkDragOffset, state.activePenIndex,
+                        ruler, recognition = state.recognitionSettings, onStraightenStroke, onShapeRecognized)
                     interaction.searchInkBounds?.let { bounds ->
                         Box(Modifier.offset(bounds.left.dp, bounds.top.dp)
                             .size((bounds.right - bounds.left).coerceAtLeast(1f).dp,
@@ -1118,7 +1126,9 @@ internal fun PageCanvas(
                             } finally { interaction.inkMoveBusy = false }
                         }
                     }
-                })
+                },
+                showForceRecognition = true,
+                onForceRecognition = { onForceShapeRecognition(selection) })
             }
         }
         // Where pastes from another app will land on this page, while they are read and downloaded.

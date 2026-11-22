@@ -27,6 +27,12 @@ interface InkSelection {
     fun ungroup(): InkSelectionChange? = null
     /** A read-only snapshot of the visible selected pieces, including their current transforms. */
     fun forRecognition(): InkPage? = null
+
+    /**
+     * Page-space points of the one held stroke, for forced shape recognition. A selection made of
+     * several pieces has no single drawing order, so platforms return null rather than guess.
+     */
+    fun recognitionPoints(): FloatArray? = null
 }
 
 /** An immutable, platform-owned copy of the visible selected pieces. */

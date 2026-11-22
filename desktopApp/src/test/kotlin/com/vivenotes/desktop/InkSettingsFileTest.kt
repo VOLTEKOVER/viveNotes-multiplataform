@@ -35,7 +35,8 @@ class InkSettingsFileTest {
         val file = Files.createTempFile("draw-kits", ".properties").toFile()
         try {
             val settings = InkSettings(pen2 = InkPenSettings(InkBrush.Calligraphy, 6f, 0xff123456.toInt(), false,
-                lineType = LineType.Dotted, pressure = 5, stabilization = 4, holdForStraightLine = false),
+                lineType = LineType.Dotted, pressure = 5, stabilization = 4,
+                holdForStraightLine = false, holdForShape = false),
                 pen3 = InkPenSettings(sizeDp = 7f), eraser = InkEraserSettings(EraserMode.Object, 42f),
                 ruler = InkRulerSettings(RulerKind.Protractor, 800), palette = PenColors.withColorInFront(0xff123456.toInt()),
                 table = TableToolSettings(inkOnly = false, columns = 5, rows = 4, headerColumn = true,

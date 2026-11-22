@@ -1,5 +1,6 @@
 package com.vivenotes.ink
 
+import androidx.ink.strokes.StrokeInput
 import com.vivenotes.byteink.kit.*
 import com.vivenotes.data.EraserMode
 import com.vivenotes.data.InkEdit
@@ -32,6 +33,22 @@ internal class DesktopInkSelection(override val page: InkPage, val held: InkLass
     override fun forRecognition(): InkPage {
         val pieces = page.desktopGeometry().selectedProjections(held.projections)
         return InkPage(page.pageId, selectedRows, geometry = DesktopInkPage(pieces))
+    }
+
+    override fun recognitionPoints(): FloatArray? {
+        val pieces = page.desktopGeometry().selectedProjections(held.projections)
+        if (pieces.size != 1) return null
+        val piece = pieces.single()
+        val inputs = piece.stroke.inputs
+        if (inputs.size == 0) return null
+        val sample = StrokeInput()
+        val points = ArrayList<Float>(inputs.size * 2)
+        for (index in 0 until inputs.size) {
+            inputs.populate(index, sample)
+            points += sample.x * piece.scaleX + piece.offsetX
+            points += sample.y * piece.scaleY + piece.offsetY
+        }
+        return points.toFloatArray()
     }
 
     override fun group(): InkSelectionChange? {

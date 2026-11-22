@@ -135,6 +135,7 @@ private fun launchStandardWindow(notes: DesktopNotes, profile: DesktopProfile, l
                     fileImporter = remember(window) { notes.fileImporter(window) },
                     onEditorDefaultsChange = notes::updateEditorDefaults,
                     onShapeSettingsChange = notes::updateShapeSettings, onInkSettingsChange = notes::updateInkSettings,
+                    onRecognitionSettingsChange = notes::updateRecognitionSettings,
                     accountHost = notes.sync?.accountHost,
                     aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
                     typstRenderer = remember { JvmTypstRenderer() },

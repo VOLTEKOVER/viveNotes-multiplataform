@@ -22,6 +22,7 @@ internal class InkSettingsFile(private val file: File) {
             pressure = integer("$prefix.pressure", default.pressure),
             stabilization = integer("$prefix.stabilization", default.stabilization),
             holdForStraightLine = flag("$prefix.holdForStraightLine", default.holdForStraightLine),
+            holdForShape = flag("$prefix.holdForShape", default.holdForShape),
         )
         return InkSettings(
             pen = pen("pen", defaults.pen), pen2 = pen("pen2", defaults.pen2), pen3 = pen("pen3", defaults.pen3),
@@ -52,6 +53,7 @@ internal class InkSettingsFile(private val file: File) {
                 setProperty("$prefix.pressure", pen.pressure.toString())
                 setProperty("$prefix.stabilization", pen.stabilization.toString())
                 setProperty("$prefix.holdForStraightLine", pen.holdForStraightLine.toString())
+                setProperty("$prefix.holdForShape", pen.holdForShape.toString())
             }
             pen("pen", value.pen); pen("pen2", value.pen2); pen("pen3", value.pen3)
             setProperty("highlighter.sizeDp", value.highlighter.sizeDp.toString())

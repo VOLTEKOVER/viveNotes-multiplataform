@@ -42,6 +42,7 @@ import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.EditorDefaults
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.ShapeToolSettings
 import com.vivenotes.workspace.WorkspaceSession
 import com.vivenotes.workspace.WorkspaceState
@@ -73,6 +74,8 @@ fun App(
     onEditorDefaultsChange: (EditorDefaults) -> Unit = {},
     onShapeSettingsChange: (ShapeToolSettings) -> Unit = {},
     onInkSettingsChange: (InkSettings) -> Unit = {},
+    /** Where Settings → Shape recognition persists its main switch and per-kind choices. */
+    onRecognitionSettingsChange: (ShapeRecognitionSettings) -> Unit = {},
     /** The platform's `.vive` file dialogs; without them notebooks cannot be exported or imported. */
     notebookFiles: NotebookFiles? = null,
     thumbnails: VideoThumbnailSource? = null,
@@ -125,6 +128,7 @@ fun App(
                     onEditorDefaultsChange = onEditorDefaultsChange,
                     onShapeSettingsChange = onShapeSettingsChange,
                     onInkSettingsChange = onInkSettingsChange,
+                    onRecognitionSettingsChange = onRecognitionSettingsChange,
                     keyBindings = keyBindings, onKeyBindingsChange = onKeyBindingsChange,
                     inputSettings = inputSettings, onInputSettingsChange = onInputSettingsChange,
                     fileActions = fileActions,

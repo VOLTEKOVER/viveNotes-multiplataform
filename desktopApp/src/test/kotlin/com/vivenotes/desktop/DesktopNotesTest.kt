@@ -24,6 +24,7 @@ import com.vivenotes.workspace.TabsLayout
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.WorkspaceState
 import com.vivenotes.workspace.ShapeToolSettings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.LineType
 import kotlinx.coroutines.CompletableDeferred
@@ -122,6 +123,29 @@ class DesktopNotesTest {
             shapeStore = ShapeSettingsFile(file))
         restarted.start()
         assertEquals(chosen, openPage(restarted).shapeSettings)
+        close(restarted)
+        restartedUi.cancel()
+    }
+
+    @Test
+    fun recognitionChoicesSurviveRestartAndSeedTheNextWorkspace() = runBlocking<Unit> {
+        val file = File(directory, "config/recognition.properties")
+        val ui = CoroutineScope(coroutineContext + SupervisorJob())
+        val notes = DesktopNotes(NotesLibrary.open(directory), ui, recognitionStore = RecognitionSettingsFile(file))
+        notes.start()
+        openPage(notes)
+        val chosen = ShapeRecognitionSettings(automatic = false,
+            enabledKinds = setOf(ShapeKind.Line, ShapeKind.Cube))
+        notes.updateRecognitionSettings(chosen)
+        assertEquals(chosen, RecognitionSettingsFile(file).load())
+        close(notes)
+        ui.cancel()
+
+        val restartedUi = CoroutineScope(coroutineContext + SupervisorJob())
+        val restarted = DesktopNotes(NotesLibrary.open(directory), restartedUi,
+            recognitionStore = RecognitionSettingsFile(file))
+        restarted.start()
+        assertEquals(chosen, openPage(restarted).recognitionSettings)
         close(restarted)
         restartedUi.cancel()
     }

@@ -47,6 +47,7 @@ import com.vivenotes.model.ink.InkSelection
 import com.vivenotes.model.newId
 import com.vivenotes.workspace.InkSettings
 import com.vivenotes.workspace.InkTool
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import kotlin.time.Clock
 import com.vivenotes.byteink.portable.InkSample as EngineSample
 import com.vivenotes.byteink.portable.InkTool as EngineTool
@@ -69,7 +70,9 @@ internal actual fun PlatformInkLayer(
     selectionOffset: Offset,
     penIndex: Int,
     ruler: com.vivenotes.model.ink.Ruler?,
+    recognition: ShapeRecognitionSettings,
     onStraighten: (com.vivenotes.model.ink.StraightLine, com.vivenotes.workspace.InkPenSettings) -> Unit,
+    onShapeRecognized: (com.vivenotes.model.ink.ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit,
 ) {
     if (pageId.isEmpty()) return
     LaunchedEffect(Unit) { WebInk.load() }

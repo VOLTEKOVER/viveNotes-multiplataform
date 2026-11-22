@@ -22,6 +22,7 @@ import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.EditorDefaults
 import com.vivenotes.workspace.ShapeToolSettings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.InkSettings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -70,6 +71,7 @@ internal class DesktopNotes(
     /** The math engine's Python and SymPy: the package's own, or installed by uv at launch. */
     val mathRuntime: MathEngineRuntime? = null,
     private val inkStore: InkSettingsFile? = null,
+    private val recognitionStore: RecognitionSettingsFile? = null,
     /** Scratch space for this profile: where Import ▸ File stages the document it reads. */
     private val cacheDirectory: File = File(System.getProperty("java.io.tmpdir"), "vivenotes-cache"),
 ) {
@@ -88,9 +90,12 @@ internal class DesktopNotes(
         private set
     var inkSettings by mutableStateOf(inkStore?.load() ?: InkSettings())
         private set
+    var recognitionSettings by mutableStateOf(recognitionStore?.load() ?: ShapeRecognitionSettings.Default)
+        private set
     val session = WorkspaceSession(library.repository, CoroutineScope(scope.coroutineContext + sessionJob), ::formatCreated,
         updatedLabel = { formatUpdated(it) }, editorDefaults = editorDefaults,
-        shapeSettings = shapeSettings, inkSettings = inkSettings, log = log, inkSource = inkSource,
+        shapeSettings = shapeSettings, inkSettings = inkSettings, recognitionSettings = recognitionSettings,
+        log = log, inkSource = inkSource,
         maySeedStarter = sync?.accounts?.let { accounts -> { accounts.maySeedStarter() } },
         remoteInk = sync?.accounts?.remoteInk, notebookCloud = sync?.notebookCloud)
     init {
@@ -123,6 +128,18 @@ internal class DesktopNotes(
             log.failure("settings", "save ink preferences", error)
         }
     }
+
+    /** Shape recognition changes arrive one checkbox at a time and are written at once. */
+    fun updateRecognitionSettings(settings: ShapeRecognitionSettings) {
+        val value = settings.normalized()
+        if (value == recognitionSettings) return
+        recognitionStore?.save(value)
+        recognitionSettings = value
+        log.event("settings") {
+            "shape recognition preferences saved: automatic=${value.automatic}, kinds=${value.enabledKinds.size}"
+        }
+    }
+
     var interfaceSettings by mutableStateOf(interfaceStore?.load() ?: InterfaceSettings())
         private set
 
@@ -290,6 +307,7 @@ internal class DesktopNotes(
                 editorStore = EditorDefaultsFile(File(directories.config, "editor.properties")),
                 shapeStore = ShapeSettingsFile(File(directories.config, "shape.properties")),
                 inkStore = InkSettingsFile(File(directories.config, "ink.properties")),
+                recognitionStore = RecognitionSettingsFile(File(directories.config, "recognition.properties")),
                 keyStore = KeyBindingsFile(File(directories.config, "keyboard.properties")),
                 inputStore = InputSettingsFile(File(directories.config, "input.properties")),
                 thumbnails = DesktopVideoThumbnails(File(directories.data, "video_thumbnails")), log = log,

@@ -1,6 +1,7 @@
 package com.vivenotes.ui.canvas
 
 import com.vivenotes.workspace.InkSettings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -20,5 +21,7 @@ internal actual fun PlatformInkLayer(
     selectionOffset: androidx.compose.ui.geometry.Offset,
     penIndex: Int,
     ruler: com.vivenotes.model.ink.Ruler?,
+    recognition: ShapeRecognitionSettings,
     onStraighten: (com.vivenotes.model.ink.StraightLine, com.vivenotes.workspace.InkPenSettings) -> Unit,
+    onShapeRecognized: (com.vivenotes.model.ink.ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit,
 ) { /* ByteInk has no Kotlin/JS build; the browser preview's ink is the Wasm target's. */ }

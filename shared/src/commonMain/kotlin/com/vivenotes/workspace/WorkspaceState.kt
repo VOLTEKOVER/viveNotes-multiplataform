@@ -25,6 +25,8 @@ import com.vivenotes.model.PageDoc
 import com.vivenotes.model.PageStyle
 import com.vivenotes.model.ink.InkPage
 import com.vivenotes.model.ink.LineType
+import com.vivenotes.model.ink.ShapeCandidate
+import com.vivenotes.model.ink.ShapeFit
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.seedSegments
 import com.vivenotes.model.ink.DEFAULT_SOLID_WALL_THICKNESS
@@ -187,6 +189,8 @@ data class WorkspaceState(
     val shapeToolArmed: Boolean = false,
     val inkTool: InkTool? = null,
     val inkSettings: InkSettings = InkSettings(),
+    /** Settings → Shape recognition: whether and which kinds a held ink stroke may become. */
+    val recognitionSettings: ShapeRecognitionSettings = ShapeRecognitionSettings.Default,
     val activePenIndex: Int = 0,
     val drawPlacement: DrawPlacementTool? = null,
     val pendingEquation: PendingDrawEquation? = null,
@@ -481,6 +485,9 @@ data class WorkspaceState(
         return copy(inkSettings = normalized, eraserMode = normalized.eraser.mode)
     }
 
+    fun setRecognitionSettings(settings: ShapeRecognitionSettings): WorkspaceState =
+        copy(recognitionSettings = settings.normalized())
+
     fun selectInkAt(x: Float, y: Float): WorkspaceState {
         val ink = selectedPage?.ink ?: return this
         val selection = ink.geometry?.selectAt(ink, x, y) ?: return this
@@ -617,6 +624,96 @@ data class WorkspaceState(
             borderArgb = settings.colorArgb, borderFollowsTheme = settings.colorFollowsTheme,
             borderWidth = settings.sizeDp, lineType = settings.lineType).withRecomputedBounds()
         return editOutlines { it + shape }
+    }
+
+    /** A shape recognized while the pen stroke is still held, before any raw ink was persisted. */
+    fun createRecognizedShape(candidate: ShapeCandidate, pen: InkPenSettings): WorkspaceState {
+        if (inkTool != InkTool.Pen) return this
+        val shape = buildRecognizedShape(candidate, pen) ?: return this
+        return editOutlines { it + shape }.copy(
+            selectedObjectIds = setOf(shape.id),
+            selectedTextOutlineIds = emptySet(),
+            focusedTextOutlineId = null,
+            wordSelections = null,
+        )
+    }
+
+    /**
+     * Converts a stroke the user already drew. "Force" ignores the automatic switch and the
+     * per-kind settings: the user asked for this stroke to become a shape now. Deleting the ink and
+     * placing the shape share one undo step, so neither can be left behind on its own.
+     */
+    fun forceShapeRecognition(selection: com.vivenotes.model.ink.InkSelection): WorkspaceState {
+        val page = editablePage ?: return this
+        if (!page.inkReady || notebookTransfer.running || filePane.busy ||
+            selectedInk !== selection || page.ink !== selection.page) return this
+        val points = selection.recognitionPoints() ?: return this
+        val candidate = ShapeFit.classify(points) ?: return this
+        val change = selection.delete() ?: return this
+        val base = inkSettings.pen(activePenIndex).normalized()
+        val selectedStrokes = selection.page.strokes.filter { it.id in selection.targetIds }
+        val size = selectedStrokes.map { it.sizeDp }.distinct().singleOrNull()
+            ?.takeIf { it.isFinite() }?.coerceIn(InkPenSettings.MIN_SIZE, InkPenSettings.MAX_SIZE)
+        val color = selection.colorArgb
+        val pen = base.copy(
+            sizeDp = size ?: base.sizeDp,
+            colorArgb = color?.let { it or 0xff000000.toInt() } ?: base.colorArgb,
+            colorFollowsTheme = color?.let { selection.colorFollowsTheme } ?: base.colorFollowsTheme,
+        )
+        val shape = buildRecognizedShape(candidate, pen) ?: return this
+        val document = page.document.copy(outlines = page.document.outlines + shape)
+        val history = InkHistoryChange(page.ink, change.after, change.undo, change.redo, document)
+        return updatePage(page.id) { it.withDocument(document).copy(ink = change.after) }.copy(
+            selectedInk = null,
+            selectedObjectIds = setOf(shape.id),
+            selectedTextOutlineIds = emptySet(),
+            focusedTextOutlineId = null,
+            wordSelections = null,
+            pendingInkEdits = pendingInkEdits.queueInk(change.edits.map { com.vivenotes.data.PendingInkEdit(newId(), page.id, it) }),
+            structuralUndo = (structuralUndo + StructuralSnapshot(page.id, page.document, history)).takeLast(100),
+            structuralRedo = emptyList(),
+        )
+    }
+
+    private fun buildRecognizedShape(candidate: ShapeCandidate, pen: InkPenSettings): Outline.Shape? {
+        val floor = editablePage?.document?.style?.titleFloor ?: return null
+        if (listOf(candidate.left, candidate.top, candidate.right, candidate.bottom,
+                candidate.startX, candidate.startY, candidate.endX, candidate.endY)
+                .any { !it.isFinite() } ||
+            minOf(candidate.top, candidate.startY) < floor) return null
+        val settings = pen.normalized()
+        val keepDirection = candidate.kind == ShapeKind.Line || candidate.kind == ShapeKind.Arrow
+        val drawnCorners = candidate.vertices?.takeIf { it.size == 3 }
+        val segments = if (drawnCorners != null) {
+            // A scalene or rotated triangle has no box-only template. Keep the corners the user
+            // drew so recognition does not silently snap it back to an isosceles one.
+            drawnCorners.indices.map { index ->
+                val from = drawnCorners[index]
+                val to = drawnCorners[(index + 1) % drawnCorners.size]
+                com.vivenotes.model.ink.ShapeSegment.straight(
+                    newId(), from.first, from.second, to.first, to.second,
+                )
+            }
+        } else {
+            seedSegments(
+                candidate.kind,
+                if (keepDirection) candidate.startX else candidate.left,
+                if (keepDirection) candidate.startY else candidate.top,
+                if (keepDirection) candidate.endX else candidate.right,
+                if (keepDirection) candidate.endY else candidate.bottom,
+                wallThickness = shapeSettings.wallThickness,
+                nextId = ::newId,
+            )
+        }
+        return Outline.Shape(
+            id = newId(), kind = candidate.kind,
+            segments = segments,
+            borderArgb = settings.colorArgb,
+            borderFollowsTheme = settings.colorFollowsTheme,
+            borderWidth = settings.sizeDp,
+            lineType = settings.lineType,
+            fillArgb = null,
+        ).withRecomputedBounds()
     }
 
     fun setSelectedShapeLineType(type: LineType): WorkspaceState = editOutlines { outlines ->

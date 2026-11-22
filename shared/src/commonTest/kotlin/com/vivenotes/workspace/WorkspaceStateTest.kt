@@ -1,16 +1,25 @@
 package com.vivenotes.workspace
 
 import com.vivenotes.data.ImportedPicture
+import com.vivenotes.data.InkEdit
 import com.vivenotes.model.Block
 import com.vivenotes.model.BlockType
+import com.vivenotes.model.PageDoc
 import com.vivenotes.model.PageStyle
 import com.vivenotes.model.PaperSize
 import com.vivenotes.model.Run
 import com.vivenotes.model.Mark
 import com.vivenotes.model.Outline
 import com.vivenotes.model.ink.ShapeSegment
+import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.LineType
+import com.vivenotes.model.ink.InkPage
+import com.vivenotes.model.ink.InkSample
+import com.vivenotes.model.ink.InkSelection
+import com.vivenotes.model.ink.InkSelectionBounds
+import com.vivenotes.model.ink.InkSelectionChange
+import com.vivenotes.model.ink.VisibleInkStroke
 import com.vivenotes.model.ink.ends
 import com.vivenotes.model.ink.arms
 import com.vivenotes.model.JsonDocumentCodec
@@ -20,6 +29,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 import kotlin.test.assertFalse
+import kotlin.test.assertSame
 
 class WorkspaceStateTest {
 
@@ -61,6 +71,128 @@ class WorkspaceStateTest {
         assertEquals(setOf(shape.id), styled.toggleObjectLock().selectedObjectIds)
         assertFalse(styled.selectPointer().shapeToolArmed)
         assertEquals(initial, initial.createShape(200f, 0f))
+    }
+
+    @Test
+    fun recognizedRectangleIsSelectedStyledAndUndoable() {
+        val initial = WorkspaceState.demo().selectInkTool(InkTool.Pen)
+        val bodyId = initial.bodyTextOutline!!.id
+        val ready = initial.focusBody().copy(selectedTextOutlineIds = setOf(bodyId))
+        val pen = InkPenSettings(sizeDp = 6f, colorArgb = 0x33123456.toInt(),
+            colorFollowsTheme = false, lineType = LineType.Dotted)
+        val candidate = ShapeCandidate(
+            kind = ShapeKind.Rectangle,
+            left = 100f, top = 200f, right = 300f, bottom = 320f,
+            startX = 100f, startY = 200f, endX = 300f, endY = 320f,
+            confidence = 0.92f,
+        )
+
+        val placed = ready.createRecognizedShape(candidate, pen)
+        val shapes = placed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>()
+        assertEquals(ready.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>().size + 1, shapes.size)
+        val shape = shapes.last()
+        assertEquals(ShapeKind.Rectangle, shape.kind)
+        assertEquals(4, shape.segments.size)
+        assertEquals(100f, shape.x); assertEquals(200f, shape.y)
+        assertEquals(200f, shape.width); assertEquals(120f, shape.height)
+        assertEquals(pen.normalized().colorArgb, shape.borderArgb)
+        assertEquals(false, shape.borderFollowsTheme)
+        assertEquals(6f, shape.borderWidth)
+        assertEquals(LineType.Dotted, shape.lineType)
+        assertEquals(null, shape.fillArgb)
+        assertEquals(setOf(shape.id), placed.selectedObjectIds)
+        assertEquals(emptySet<String>(), placed.selectedTextOutlineIds)
+        assertEquals(null, placed.focusedTextOutlineId)
+        assertEquals(ready.structuralUndo.size + 1, placed.structuralUndo.size)
+        assertEquals(ready.selectedPage!!.document, placed.undoStructure().selectedPage!!.document)
+    }
+
+    @Test
+    fun recognizedArrowKeepsTheStrokeDirectionInItsSegments() {
+        val initial = WorkspaceState.demo().selectInkTool(InkTool.Pen)
+        val candidate = ShapeCandidate(
+            kind = ShapeKind.Arrow,
+            left = 120f, top = 180f, right = 300f, bottom = 260f,
+            startX = 300f, startY = 260f, endX = 120f, endY = 180f,
+            confidence = 0.87f,
+        )
+
+        val placed = initial.createRecognizedShape(candidate, InkPenSettings())
+        val arrow = placed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>().last()
+        val shaft = arrow.segments.first()
+        assertEquals(ShapeKind.Arrow, arrow.kind)
+        assertEquals(candidate.startX, shaft.x1)
+        assertEquals(candidate.startY, shaft.y1)
+        assertEquals(candidate.endX, shaft.x2)
+        assertEquals(candidate.endY, shaft.y2)
+    }
+
+    @Test
+    fun recognizedScaleneTriangleKeepsItsDrawnCorners() {
+        val initial = WorkspaceState.demo().selectInkTool(InkTool.Pen)
+        val corners = listOf(105f to 275f, 185f to 121f, 318f to 263f)
+        val candidate = ShapeCandidate(
+            kind = ShapeKind.Triangle,
+            left = 105f, top = 121f, right = 318f, bottom = 275f,
+            startX = 105f, startY = 275f, endX = 105f, endY = 275f,
+            confidence = 0.88f,
+            vertices = corners,
+        )
+
+        val placed = initial.createRecognizedShape(candidate, InkPenSettings())
+        val shape = placed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>().last()
+        assertEquals(ShapeKind.Triangle, shape.kind)
+        assertEquals(3, shape.segments.size)
+        corners.forEachIndexed { index, from ->
+            val to = corners[(index + 1) % corners.size]
+            val edge = shape.segments[index]
+            assertEquals(from.first, edge.x1)
+            assertEquals(from.second, edge.y1)
+            assertEquals(to.first, edge.x2)
+            assertEquals(to.second, edge.y2)
+        }
+        // The bounds must cover the drawn corners, not a symmetrical box template.
+        assertEquals(105f, shape.x)
+        assertEquals(121f, shape.y)
+        assertEquals(318f - 105f, shape.width)
+        assertEquals(275f - 121f, shape.height)
+        assertEquals(initial.structuralUndo.size + 1, placed.structuralUndo.size)
+        assertEquals(initial.selectedPage!!.document, placed.undoStructure().selectedPage!!.document)
+    }
+
+    @Test
+    fun recognizedShapeAboveTheTitleFloorIsRefused() {
+        val initial = WorkspaceState.demo().selectInkTool(InkTool.Pen)
+        val floor = initial.selectedPage!!.document.style.titleFloor
+        val candidate = ShapeCandidate(
+            kind = ShapeKind.Rectangle,
+            left = 100f, top = floor - 1f, right = 300f, bottom = floor + 80f,
+            startX = 100f, startY = floor - 1f, endX = 300f, endY = floor + 80f,
+            confidence = 0.75f,
+        )
+
+        assertSame(initial, initial.createRecognizedShape(candidate, InkPenSettings()))
+    }
+
+    @Test
+    fun recognizedPreferencesKeepTheMainSwitchAndTheSelectedKinds() {
+        val initial = WorkspaceState.demo()
+        assertEquals(ShapeKind.entries.toSet(), initial.recognitionSettings.enabledKinds)
+        assertTrue(initial.recognitionSettings.automatic)
+
+        val chosen = ShapeRecognitionSettings(automatic = false,
+            enabledKinds = setOf(ShapeKind.Line, ShapeKind.Arrow))
+        val changed = initial.setRecognitionSettings(chosen)
+
+        assertEquals(chosen, changed.recognitionSettings)
+        assertTrue(chosen.enabledKinds.contains(ShapeKind.Arrow))
+        assertFalse(chosen.allows(ShapeKind.Arrow), "the main switch gates every kind")
+        val armed = chosen.copy(automatic = true)
+        assertTrue(armed.allows(ShapeKind.Arrow))
+        assertFalse(armed.allows(ShapeKind.Rectangle))
+        assertEquals(setOf(ShapeKind.Rectangle), chosen.withKind(ShapeKind.Rectangle, true).enabledKinds -
+            setOf(ShapeKind.Line, ShapeKind.Arrow))
+        assertEquals(setOf(ShapeKind.Line), chosen.withKind(ShapeKind.Arrow, false).enabledKinds)
     }
 
     @Test
@@ -656,5 +788,91 @@ class WorkspaceStateTest {
         val edited = second.updateSelectedPage(body = "Replaced")
         assertEquals("Replaced", edited.selectedPage!!.body)
         assertEquals("other", edited.richText!!.text, "the focused box is not the body")
+    }
+
+    @Test
+    fun forcedShapeRecognitionReplacesSelectedInkInOneUndoStep() {
+        val (ready, selection, beforeInk) = forcedRecognitionState(setOf(ShapeKind.Rectangle))
+
+        val placed = ready.forceShapeRecognition(selection)
+        val shape = placed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>().single()
+        assertEquals(ShapeKind.Rectangle, shape.kind)
+        assertEquals(100f, shape.x, 0.01f)
+        assertEquals(120f, shape.y, 0.01f)
+        assertEquals(200f, shape.width, 0.01f)
+        assertEquals(160f, shape.height, 0.01f)
+        assertEquals(0xff336699.toInt(), shape.borderArgb, "the shape keeps the ink's colour")
+        assertEquals(false, shape.borderFollowsTheme)
+        assertEquals(4f, shape.borderWidth, "the shape keeps the stroke's width")
+        assertEquals(emptyList<VisibleInkStroke>(), placed.selectedPage!!.ink!!.strokes)
+        assertEquals(null, placed.selectedInk)
+        assertEquals(setOf(shape.id), placed.selectedObjectIds)
+        assertEquals(ready.structuralUndo.size + 1, placed.structuralUndo.size)
+        val undone = placed.undoStructure()
+        assertEquals(beforeInk, undone.selectedPage!!.ink)
+        assertEquals(ready.selectedPage!!.document, undone.selectedPage!!.document)
+    }
+
+    @Test
+    fun forcedShapeRecognitionIgnoresDisabledKindsAndTheAutomaticSwitch() {
+        val (ready, selection, _) = forcedRecognitionState(emptySet())
+
+        val placed = ready.forceShapeRecognition(selection)
+        assertEquals(ShapeKind.Rectangle,
+            placed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>().single().kind)
+    }
+
+    @Test
+    fun forcedShapeRecognitionLeavesUnreadableInkAlone() {
+        val scribble = floatArrayOf(100f, 100f, 300f, 260f, 100f, 260f, 300f, 100f, 200f, 180f)
+        val (ready, selection, _) = forcedRecognitionState(ShapeKind.entries.toSet(), scribble)
+
+        assertSame(ready, ready.forceShapeRecognition(selection))
+    }
+
+    private class HeldRecognition(
+        override val page: InkPage,
+        override val targetIds: Set<String>,
+        private val points: FloatArray,
+        private val deletion: InkSelectionChange,
+    ) : InkSelection {
+        override val bounds = InkSelectionBounds(100f, 120f, 300f, 280f)
+        override fun recognitionPoints(): FloatArray = points
+        override fun move(dx: Float, dy: Float): InkSelectionChange? = null
+        override fun delete(): InkSelectionChange = deletion
+    }
+
+    private fun forcedRecognitionState(
+        enabledKinds: Set<ShapeKind>,
+        points: FloatArray = rectanglePoints(100f, 120f, 300f, 280f),
+    ): Triple<WorkspaceState, HeldRecognition, InkPage> {
+        val samples = points.asList().chunked(2).map { (x, y) -> InkSample(x, y) }
+        val base = WorkspaceState.demo()
+        val ink = InkPage(base.selectedPageId,
+            listOf(VisibleInkStroke("ink", "marker", 1, 4f, 0xff336699.toInt(), false, samples)))
+        val deletion = InkSelectionChange(ink, ink.copy(strokes = emptyList()),
+            listOf(InkEdit.EraseStrokes(setOf("ink"))),
+            listOf(InkEdit.RestoreStrokes(setOf("ink"), ink)))
+        val selection = HeldRecognition(ink, setOf("ink"), points, deletion)
+        val ready = base.updatePage(base.selectedPageId) { page ->
+            page.copy(document = PageDoc(outlines = emptyList()), ink = ink)
+        }.copy(selectedInk = selection).setRecognitionSettings(
+            ShapeRecognitionSettings(automatic = false, enabledKinds = enabledKinds))
+        return Triple(ready, selection, ink)
+    }
+
+    private fun rectanglePoints(left: Float, top: Float, right: Float, bottom: Float): FloatArray {
+        val corners = listOf(left to top, right to top, right to bottom, left to bottom, left to top)
+        val points = ArrayList<Float>()
+        for (index in 0 until corners.size - 1) {
+            val (fromX, fromY) = corners[index]
+            val (toX, toY) = corners[index + 1]
+            repeat(24) { step ->
+                val t = step / 23f
+                points += fromX + (toX - fromX) * t
+                points += fromY + (toY - fromY) * t
+            }
+        }
+        return points.toFloatArray()
     }
 }

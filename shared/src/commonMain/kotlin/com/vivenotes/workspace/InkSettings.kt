@@ -19,6 +19,7 @@ data class InkPenSettings(
     val pressure: Int = 3,
     val stabilization: Int = 1,
     val holdForStraightLine: Boolean = true,
+    val holdForShape: Boolean = true,
 ) {
     fun normalized(): InkPenSettings = copy(
         sizeDp = if (sizeDp.isFinite()) sizeDp.coerceIn(MIN_SIZE, MAX_SIZE) else 1.5f,

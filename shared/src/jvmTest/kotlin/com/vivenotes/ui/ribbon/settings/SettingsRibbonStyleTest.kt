@@ -42,6 +42,7 @@ class SettingsRibbonStyleTest {
                 runOnIdle { darkTheme.value = dark }
                 assertIconContains("interface", if (dark) Color(0xFFE5E7ED) else Color(0xFF242428))
                 assertIconContains("hardware", if (dark) Color(0xFF5DAFFF) else Color(0xFF3584E4))
+                assertIconContains("recognition", if (dark) Color(0xFFE5E7ED) else Color(0xFF242428))
                 assertIconContains("models", if (dark) Color(0xFFA8ABB4) else Color(0xFF777780))
             }
             onNodeWithTag("settings-models").assertIsNotEnabled()
@@ -59,11 +60,14 @@ class SettingsRibbonStyleTest {
         runDesktopComposeUiTest(width = 900, height = 300) {
             setContent {
                 var hardwareOpen by remember { mutableStateOf(false) }
+                var recognitionOpen by remember { mutableStateOf(false) }
                 var linkPreviews by remember { mutableStateOf(false) }
                 ViveNotesTheme(darkTheme = true) {
                     SettingsRibbon(onInterface = {}, hardwareOpen = hardwareOpen,
                         onHardware = { hardwareOpen = !hardwareOpen }, linkPreviews = linkPreviews,
-                        onLinkPreviewsChange = { linkPreviews = it }, onAbout = {})
+                        onLinkPreviewsChange = { linkPreviews = it }, onAbout = {},
+                        recognitionOpen = recognitionOpen,
+                        onRecognition = { recognitionOpen = !recognitionOpen })
                 }
             }
 
@@ -76,16 +80,19 @@ class SettingsRibbonStyleTest {
 
             onNodeWithTag("settings-appearance").assertDoesNotExist()
             onNodeWithTag("settings-models").assertIsNotEnabled()
-            for (label in listOf("interface", "link-previews", "hardware", "models", "about")) {
+            for (label in listOf("interface", "link-previews", "hardware", "recognition", "models", "about")) {
                 onNodeWithTag("settings-icon-$label", useUnmergedTree = true).assertIsDisplayed()
             }
             assertIconContains("interface", Color(0xFFE5E7ED))
             assertIconContains("hardware", Color(0xFF5DAFFF))
+            assertIconContains("recognition", Color(0xFFE5E7ED))
             assertIconContains("models", Color(0xFFA8ABB4))
             onNodeWithTag(HardwareTags.Open).assertIsNotSelected().performClick().assertIsSelected()
             val active = onNodeWithTag(HardwareTags.Open).captureToImage().toPixelMap()
             assertColor(active[active.width / 2, active.height - 2], Color(0xFF007FFF))
 
+            onNodeWithTag(RecognitionTags.Open).assertIsNotSelected().performClick().assertIsSelected()
+            onNodeWithTag(RecognitionTags.Open).performClick().assertIsNotSelected()
             onNodeWithTag(LINK_PREVIEWS_TAG).performClick().assertIsSelected()
             onNodeWithTag(LINK_PREVIEWS_TAG).performClick().assertIsNotSelected()
             onNodeWithTag(HardwareTags.Open).performClick().assertIsNotSelected()

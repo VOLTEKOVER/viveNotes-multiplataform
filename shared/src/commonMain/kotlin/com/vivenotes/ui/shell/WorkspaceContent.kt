@@ -85,6 +85,7 @@ import com.vivenotes.workspace.NavigationActions
 import com.vivenotes.workspace.PenAction
 import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.RibbonTab
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.ShapeToolSettings
 import com.vivenotes.workspace.ShortcutAction
 import com.vivenotes.workspace.ShortcutScope
@@ -118,6 +119,7 @@ internal fun WorkspaceContent(
     onEditorDefaultsChange: (EditorDefaults) -> Unit,
     onShapeSettingsChange: (ShapeToolSettings) -> Unit,
     onInkSettingsChange: (InkSettings) -> Unit,
+    onRecognitionSettingsChange: (ShapeRecognitionSettings) -> Unit,
     accountConnected: Boolean,
     serverUnreachable: Boolean,
     onOpenAccount: () -> Unit,
@@ -506,6 +508,14 @@ internal fun WorkspaceContent(
                             formulaReady = formulaReady,
                             onInkMath = { selection -> if (formulaReady && state.inkAndLinesSelection && state.selectedInk === selection) {
                                 inkMath = InkMathRequest(selection, state.selectedFormulaLines); openPane = DockedPane.Math } },
+                            onShapeRecognized = { candidate, pen ->
+                                onStateChange { it.createRecognizedShape(candidate, pen) }
+                                debugLog.event("ink") { "recognised shape" }
+                            },
+                            onForceShapeRecognition = { selection ->
+                                onStateChange { it.forceShapeRecognition(selection) }
+                                debugLog.event("ink") { "forced shape recognition" }
+                            },
                             applyEditorCommand = ::applyEditorCommand,
                             onLinkRequest = { linkEditor = it },
                             onEditGraphSliders = { graphSliders = it },
@@ -534,6 +544,8 @@ internal fun WorkspaceContent(
                         onEditorDefaultsChange = onEditorDefaultsChange,
                         input = input,
                         onInputChange = onInputChange,
+                        recognitionSettings = state.recognitionSettings,
+                        onRecognitionSettingsChange = onRecognitionSettingsChange,
                         bindings = bindings,
                         onEditShortcut = { editingShortcut = it },
                         onEditPenKey = { editingPenKey = it },
@@ -638,7 +650,7 @@ internal fun WorkspaceContent(
 }
 
 
-internal enum class DockedPane { PaperSize, Hardware, Models, Search, Math, Typst }
+internal enum class DockedPane { PaperSize, Hardware, Recognition, Models, Search, Math, Typst }
 
 /** The diagram a panel session will replace when its Apply button is pressed. */
 private data class TypstEditTarget(val pageId: String, val outlineId: String)

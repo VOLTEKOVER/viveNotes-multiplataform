@@ -84,6 +84,8 @@ internal fun WorkspaceRibbon(
             onHardware = { togglePane(DockedPane.Hardware) }, linkPreviews = view.linkPreviews,
             onLinkPreviewsChange = { enabled -> onViewChange(view.copy(linkPreviews = enabled)) },
             onAbout = onAbout, modelsAvailable = aiModels != null,
-            modelsOpen = openPane == DockedPane.Models, onModels = { togglePane(DockedPane.Models) })
+            modelsOpen = openPane == DockedPane.Models, onModels = { togglePane(DockedPane.Models) },
+            recognitionOpen = openPane == DockedPane.Recognition,
+            onRecognition = { togglePane(DockedPane.Recognition) })
     }
 }

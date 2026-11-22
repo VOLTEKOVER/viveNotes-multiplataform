@@ -49,6 +49,27 @@ class DesktopInkSelectionTest {
     }
 
     @Test
+    fun recognitionPointsFollowTheSelectedPieceIntoPageSpace() {
+        val page = InkPageReader.read("page", listOf(selectionLine(pageId = "page")), emptyList(), emptyList())
+        val selection = assertNotNull(page.geometry!!.selectInRect(page, 0f, 180f, 130f, 220f))
+        val points = assertNotNull(selection.recognitionPoints())
+        assertEquals(4, points.size)
+        assertEquals(10f, points[0], 0.01f)
+        assertEquals(200f, points[1], 0.01f)
+        assertEquals(110f, points[2], 0.01f)
+        assertEquals(200f, points[3], 0.01f)
+
+        val moved = assertNotNull(selection.move(20f, 40f))
+        val movedPoints = assertNotNull(moved.selection!!.recognitionPoints())
+        assertEquals(30f, movedPoints[0], 0.01f)
+        assertEquals(240f, movedPoints[1], 0.01f)
+
+        val (_, split) = splitSelectionPage()
+        val both = assertNotNull(split.geometry!!.selectInRect(split, 0f, 180f, 120f, 220f))
+        assertNull(both.recognitionPoints(), "a stroke cut in two has no single drawing order")
+    }
+
+    @Test
     fun inkLassosDropLocksAndMixedMovesNeverShiftALockedOutline() {
         val initial = WorkspaceState.demo()
         val ink = InkPageReader.read(initial.selectedPageId,

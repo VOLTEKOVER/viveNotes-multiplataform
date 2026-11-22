@@ -61,6 +61,8 @@ class WorkspaceSession(
     private val shapeSettings: ShapeToolSettings = ShapeToolSettings(),
     private val log: DebugLog = DebugLog(),
     private val inkSettings: InkSettings = InkSettings(),
+    /** Settings → Shape recognition, seeded into every workspace and mirrored back to the host. */
+    private val recognitionSettings: ShapeRecognitionSettings = ShapeRecognitionSettings.Default,
     /**
      * Android's `SyncAccounts.maySeedStarter`: false while this installation is joining an account it
      * has not pulled yet, which must not grow a second starter notebook nobody created. Asked once,
@@ -234,6 +236,7 @@ class WorkspaceSession(
         if (before.activePenIndex != after.activePenIndex) log.event("ink") { "pen preset ${after.activePenIndex + 1}" }
         if (before.rulerVisible != after.rulerVisible) log.event("ink") { "ruler ${if (after.rulerVisible) "shown" else "hidden"}" }
         if (before.inkSettings != after.inkSettings) log.event("ink") { "drawing preferences changed" }
+        if (before.recognitionSettings != after.recognitionSettings) log.event("settings") { "shape recognition preferences changed" }
         if (before.selectedInk !== after.selectedInk) log.event("ink") {
             if (after.selectedInk == null) "selection cleared" else "ink selected"
         }
@@ -1070,7 +1073,8 @@ class WorkspaceSession(
             val notebook = notebooks.firstOrNull()
             val section = notebook?.sections?.firstOrNull()
             current.value = WorkspaceState(notebooks, notebook?.id.orEmpty(), section?.id.orEmpty(), "",
-                editorDefaults = editorDefaults, shapeSettings = shapeSettings, inkSettings = inkSettings.normalized(), eraserMode = inkSettings.eraser.mode)
+                editorDefaults = editorDefaults, shapeSettings = shapeSettings, inkSettings = inkSettings.normalized(),
+                recognitionSettings = recognitionSettings.normalized(), eraserMode = inkSettings.eraser.mode)
             openSection.value = section?.id
             return
         }
@@ -1178,7 +1182,8 @@ class WorkspaceSession(
         log.failure("storage", "store operation", error)
         val message = "$failure. ${error.message ?: error::class.simpleName.orEmpty()}".trim()
         current.value = (current.value ?: WorkspaceState(emptyList(), "", "", "",
-            editorDefaults = editorDefaults, shapeSettings = shapeSettings, inkSettings = inkSettings.normalized(), eraserMode = inkSettings.eraser.mode)).copy(storageError = message)
+            editorDefaults = editorDefaults, shapeSettings = shapeSettings, inkSettings = inkSettings.normalized(),
+            recognitionSettings = recognitionSettings.normalized(), eraserMode = inkSettings.eraser.mode)).copy(storageError = message)
     }
 
     companion object {

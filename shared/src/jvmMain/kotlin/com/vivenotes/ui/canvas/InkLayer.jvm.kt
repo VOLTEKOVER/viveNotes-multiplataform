@@ -1,6 +1,7 @@
 package com.vivenotes.ui.canvas
 
 import com.vivenotes.workspace.InkSettings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -41,6 +42,8 @@ import kotlinx.coroutines.delay
 import com.vivenotes.model.ink.RulerPoint
 import com.vivenotes.model.ink.Ruler
 import com.vivenotes.model.ink.StraightenHold
+import com.vivenotes.model.ink.ShapeCandidate
+import com.vivenotes.model.ink.ShapeHold
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ensureActive
@@ -62,7 +65,9 @@ internal actual fun PlatformInkLayer(
     selectionOffset: androidx.compose.ui.geometry.Offset,
     penIndex: Int,
     ruler: com.vivenotes.model.ink.Ruler?,
+    recognition: ShapeRecognitionSettings,
     onStraighten: (com.vivenotes.model.ink.StraightLine, com.vivenotes.workspace.InkPenSettings) -> Unit,
+    onShapeRecognized: (ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit,
 ) {
     if (pageId.isEmpty()) return
     val snapshot = page ?: remember(pageId) { InkPage(pageId, emptyList()) }
@@ -103,8 +108,10 @@ internal actual fun PlatformInkLayer(
     val pen = remember(tool, canvasInk, settings, penIndex) { settings.byteInkTool(tool, canvasInk.toArgb(), penIndex) }
     val currentPen by rememberUpdatedState(pen)
     val currentSettings by rememberUpdatedState(settings)
+    val currentRecognition by rememberUpdatedState(recognition)
     val currentRuler by rememberUpdatedState(ruler)
     val currentStraighten by rememberUpdatedState(onStraighten)
+    val currentShapeRecognized by rememberUpdatedState(onShapeRecognized)
     val currentPenHaptics by rememberUpdatedState(LocalPenHaptics.current)
     var holdCandidate by remember(controller) { mutableStateOf<HoldCandidate?>(null) }
     var holdRevision by remember(controller) { mutableIntStateOf(0) }
@@ -112,11 +119,21 @@ internal actual fun PlatformInkLayer(
         val candidate = holdCandidate ?: return@LaunchedEffect
         delay(1000)
         if (holdCandidate !== candidate || !controller.isDrawing) return@LaunchedEffect
-        val line = candidate.hold.line() ?: return@LaunchedEffect
-        candidate.hold.spend()
-        controller.cancel()
-        frameRevision++
-        candidate.commit(line)
+        val line = candidate.straight?.line()
+        if (line != null) {
+            candidate.spendBoth()
+            controller.cancel()
+            frameRevision++
+            candidate.commitLine(line)
+            return@LaunchedEffect
+        }
+        val shape = candidate.shape?.candidate()
+        if (shape != null) {
+            candidate.spendBoth()
+            controller.cancel()
+            frameRevision++
+            candidate.commitShape(shape, candidate.pen)
+        }
     }
     val currentPage by rememberUpdatedState(remember(snapshot, native) {
         if (snapshot.geometry === native) snapshot else snapshot.copy(geometry = native)
@@ -184,7 +201,8 @@ internal actual fun PlatformInkLayer(
         }
     }
     val input = if (tool == null) Modifier else
-        Modifier.pointerInput(pageId, tool, penIndex, eraserMode, settings.eraser.sizeDp, density, zoom, titleFloorDp) {
+        Modifier.pointerInput(pageId, tool, penIndex, eraserMode, settings.eraser.sizeDp, density, zoom, titleFloorDp,
+            recognition) {
             coroutineScope {
                 var anchor = currentPage
                 var projected = anchor
@@ -280,8 +298,10 @@ internal actual fun PlatformInkLayer(
                                 diagnostics?.inputObserved()
                                 val capturedTool = currentPen
                                 val capturedPreset = currentSettings.pen(penIndex)
+                                val capturedRecognition = currentRecognition
                                 val callback = currentCallback
                                 val straightCallback = currentStraighten
+                                val shapeCallback = currentShapeRecognized
                                 val capturedRuler = currentRuler?.takeIf {
                                     it.engages(RulerPoint(down.position.x / density, down.position.y / density), Ruler.SNAP_TOLERANCE_DP)
                                 }
@@ -294,12 +314,28 @@ internal actual fun PlatformInkLayer(
                                     } else point
                                     return change.inkSample(mapped, time, pressure)
                                 }
-                                val hold = if (stroke == InkTool.Pen && capturedPreset.holdForStraightLine && capturedRuler == null)
-                                    StraightenHold(viewConfiguration.touchSlop / density) else null
+                                val slop = viewConfiguration.touchSlop / density
+                                val straightHold = if (stroke == InkTool.Pen && capturedPreset.holdForStraightLine && capturedRuler == null)
+                                    StraightenHold(slop) else null
+                                val shapeEnabled = capturedRecognition.automatic &&
+                                    capturedRecognition.enabledKinds.isNotEmpty()
+                                val shapeHold = if (stroke == InkTool.Pen && capturedPreset.holdForShape &&
+                                    shapeEnabled && capturedRuler == null
+                                ) ShapeHold(slop, capturedRecognition.enabledKinds) else null
                                 fun observeHold(point: Offset) {
-                                    if (hold?.observe(point.x / density, point.y / density) == true) holdRevision++
+                                    val x = point.x / density
+                                    val y = point.y / density
+                                    val straightMoved = straightHold?.observe(x, y) == true
+                                    val shapeMoved = shapeHold?.observe(x, y) == true
+                                    if (straightMoved || shapeMoved) holdRevision++
                                 }
-                                holdCandidate = hold?.let { HoldCandidate(it) { line -> straightCallback(line, capturedPreset) } }
+                                holdCandidate = if (straightHold != null || shapeHold != null) HoldCandidate(
+                                    straight = straightHold,
+                                    shape = shapeHold,
+                                    pen = capturedPreset,
+                                    commitLine = { line -> straightCallback(line, capturedPreset) },
+                                    commitShape = { candidate, pen -> shapeCallback(candidate, pen) },
+                                ) else null
                                 observeHold(down.position)
                                 controller.begin(capturedTool.brush, sample(down), transform)
                                 diagnostics?.shapeAdvanced()
@@ -314,7 +350,7 @@ internal actual fun PlatformInkLayer(
                                             (down.type == PointerType.Touch && event.changes.count { it.pressed && it.type == PointerType.Touch } > 1)) break
                                         val finished = change.changedToUpIgnoreConsumed() ||
                                             (down.type == PointerType.Mouse && !event.buttons.isPrimaryPressed)
-                                        if (hold?.spent != true) {
+                                        if (straightHold?.spent != true && shapeHold?.spent != true) {
                                             diagnostics?.inputObserved(1 + change.historical.size)
                                             change.historical.forEach { historical ->
                                                 controller.append(sample(change, historical.position, historical.uptimeMillis, false))
@@ -407,4 +443,15 @@ private fun PointerInputChange.inkSample(
     return InkPointerSample(point.x, point.y, uptime, inputTool, measuredPenPressure(includePressure))
 }
 
-private class HoldCandidate(val hold: StraightenHold, val commit: (com.vivenotes.model.ink.StraightLine) -> Unit)
+private class HoldCandidate(
+    val straight: StraightenHold?,
+    val shape: ShapeHold?,
+    val pen: com.vivenotes.workspace.InkPenSettings,
+    val commitLine: (com.vivenotes.model.ink.StraightLine) -> Unit,
+    val commitShape: (ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit,
+) {
+    fun spendBoth() {
+        straight?.spend()
+        shape?.spend()
+    }
+}

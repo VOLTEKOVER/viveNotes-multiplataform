@@ -302,4 +302,25 @@ class InkToolkitInteractionTest {
             }
         }
     }
+
+    @Test
+    fun forceShapeRecognitionButtonIsCaptionedAndCallsBack() = runDesktopComposeUiTest(width = 1000, height = 400) {
+        val selected = workspace().selectedInk!!
+        val forced = mutableStateOf(0)
+        setContent { ViveNotesTheme(darkTheme = true) {
+            CompositionLocalProvider(LocalDensity provides Density(2f)) {
+                Box(Modifier.size(500.dp, 200.dp)) {
+                    InkSelectionToolkit(selected, Rect(20f, 180f, 300f, 250f), IntSize(1000, 400),
+                        Color.White, enabled = true, showColor = true, onBoundsChange = {}, onCopy = {},
+                        onDelete = {}, onColor = { _, _ -> }, showGroup = false, showMath = false,
+                        onGroup = {}, onMath = {}, showForceRecognition = true,
+                        onForceRecognition = { forced.value++ })
+                }
+            }
+        } }
+        onNodeWithTag(WorkspaceTestTags.InkForceRecognition)
+            .assertTextEquals("Force shape recognition")
+            .performClick()
+        assertEquals(1, forced.value)
+    }
 }

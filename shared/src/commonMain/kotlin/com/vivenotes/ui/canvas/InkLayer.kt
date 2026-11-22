@@ -1,6 +1,7 @@
 package com.vivenotes.ui.canvas
 
 import com.vivenotes.workspace.InkSettings
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
@@ -9,6 +10,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import com.vivenotes.data.InkEdit
 import com.vivenotes.model.ink.InkPage
+import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.workspace.InkTool
 
 internal const val INK_LAYER_TAG = "workspace-ink-layer"
@@ -27,8 +29,10 @@ internal fun InkLayer(
     selectionOffset: Offset = Offset.Zero,
     penIndex: Int = 0,
     ruler: com.vivenotes.model.ink.Ruler? = null,
+    recognition: ShapeRecognitionSettings = ShapeRecognitionSettings.Default,
     onStraighten: (com.vivenotes.model.ink.StraightLine, com.vivenotes.workspace.InkPenSettings) -> Unit = { _, _ -> },
-) = PlatformInkLayer(page, canvasSize, canvasInk, visibleWindow, pageId, tool, titleFloorDp, onEdit, zoom, eraserMode, settings, selection, selectionOffset, penIndex, ruler, onStraighten)
+    onShapeRecognized: (ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit = { _, _ -> },
+) = PlatformInkLayer(page, canvasSize, canvasInk, visibleWindow, pageId, tool, titleFloorDp, onEdit, zoom, eraserMode, settings, selection, selectionOffset, penIndex, ruler, recognition, onStraighten, onShapeRecognized)
 
 @Composable
 internal expect fun PlatformInkLayer(
@@ -41,7 +45,9 @@ internal expect fun PlatformInkLayer(
     selectionOffset: androidx.compose.ui.geometry.Offset,
     penIndex: Int,
     ruler: com.vivenotes.model.ink.Ruler?,
+    recognition: ShapeRecognitionSettings,
     onStraighten: (com.vivenotes.model.ink.StraightLine, com.vivenotes.workspace.InkPenSettings) -> Unit,
+    onShapeRecognized: (ShapeCandidate, com.vivenotes.workspace.InkPenSettings) -> Unit,
 )
 
 internal fun InkPage.contentEdge(): Offset = geometry?.let { Offset(it.rightDp, it.bottomDp) }

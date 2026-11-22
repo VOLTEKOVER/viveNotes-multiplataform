@@ -55,6 +55,7 @@ import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.NavigationActions
 import com.vivenotes.workspace.RibbonTab
+import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.ShapeToolSettings
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.WorkspaceState
@@ -95,6 +96,7 @@ object WorkspaceTestTags {
     const val ObjectTypstEdit = "workspace-object-typst-edit"
     const val InkGroup = "workspace-ink-group"
     const val InkMath = "workspace-ink-math"
+    const val InkForceRecognition = "workspace-ink-force-recognition"
     const val InkColorDivider = "workspace-ink-color-divider"
     const val GroupSelectionFrame = "workspace-group-selection-frame"
     const val StructuralUndo = "workspace-structural-undo"
@@ -145,6 +147,8 @@ fun WorkspaceScreen(
     onEditorDefaultsChange: (EditorDefaults) -> Unit = {},
     onShapeSettingsChange: (ShapeToolSettings) -> Unit = {},
     onInkSettingsChange: (InkSettings) -> Unit = {},
+    /** Where Settings → Shape recognition sends its main switch and per-kind choices. */
+    onRecognitionSettingsChange: (ShapeRecognitionSettings) -> Unit = {},
     /** The keyboard shortcuts in force, and where Settings → Hardware sends changes to them. */
     keyBindings: KeyBindings = KeyBindings.Default,
     onKeyBindingsChange: (KeyBindings) -> Unit = {},
@@ -238,6 +242,7 @@ fun WorkspaceScreen(
                         onEditorDefaultsChange = onEditorDefaultsChange,
                         onShapeSettingsChange = onShapeSettingsChange,
                         onInkSettingsChange = onInkSettingsChange,
+                        onRecognitionSettingsChange = onRecognitionSettingsChange,
                         accountConnected = accountConnected, serverUnreachable = accountUnreachable,
                         onOpenAccount = { accountOpen = true },
                         onAbout = { aboutOpen = true }, aiModels = aiModels, drawMath = drawMath,

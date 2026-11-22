@@ -96,6 +96,76 @@ class DrawToolsInteractionTest {
     }
 
     @Test
+    fun holdingARectangleReplacesWetInkOnceAndLiftingDoesNotCommitTheOriginalStroke() = runDesktopComposeUiTest(width = 256, height = 256) {
+        val shapes = mutableListOf<ShapeCandidate>()
+        val edits = mutableListOf<InkEdit>()
+        setContent { InkLayer(InkPage("page", emptyList()), DpSize(256.dp, 256.dp), Color.Black,
+            tool = InkTool.Pen, onShapeRecognized = { candidate, _ -> shapes += candidate },
+            onEdit = { edit, _ -> edits += edit }) }
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput {
+            updatePointerTo(Offset(30f, 40f)); press()
+            moveTo(Offset(110f, 40f), delayMillis = 10); moveTo(Offset(200f, 40f), delayMillis = 10)
+            moveTo(Offset(200f, 110f), delayMillis = 10); moveTo(Offset(200f, 180f), delayMillis = 10)
+            moveTo(Offset(115f, 180f), delayMillis = 10); moveTo(Offset(30f, 180f), delayMillis = 10)
+            moveTo(Offset(30f, 110f), delayMillis = 10); moveTo(Offset(30f, 40f), delayMillis = 10)
+        }
+        mainClock.advanceTimeBy(1100)
+        waitUntil(timeoutMillis = 5000) { shapes.isNotEmpty() }
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput { release() }
+        runOnIdle {
+            assertEquals(1, shapes.size)
+            assertEquals(ShapeKind.Rectangle, shapes.single().kind)
+            assertTrue(edits.isEmpty())
+        }
+    }
+
+    @Test
+    fun recognitionSwitchedOffLeavesTheHeldRectangleAsInk() = runDesktopComposeUiTest(width = 256, height = 256) {
+        val shapes = mutableListOf<ShapeCandidate>()
+        val edits = mutableListOf<InkEdit>()
+        setContent { InkLayer(InkPage("page", emptyList()), DpSize(256.dp, 256.dp), Color.Black,
+            tool = InkTool.Pen, recognition = ShapeRecognitionSettings(automatic = false),
+            onShapeRecognized = { candidate, _ -> shapes += candidate },
+            onEdit = { edit, _ -> edits += edit }) }
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput {
+            updatePointerTo(Offset(30f, 40f)); press()
+            moveTo(Offset(110f, 40f), delayMillis = 10); moveTo(Offset(200f, 40f), delayMillis = 10)
+            moveTo(Offset(200f, 110f), delayMillis = 10); moveTo(Offset(200f, 180f), delayMillis = 10)
+            moveTo(Offset(115f, 180f), delayMillis = 10); moveTo(Offset(30f, 180f), delayMillis = 10)
+            moveTo(Offset(30f, 110f), delayMillis = 10); moveTo(Offset(30f, 40f), delayMillis = 10)
+        }
+        mainClock.advanceTimeBy(1100)
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput { release() }
+        runOnIdle {
+            assertTrue(shapes.isEmpty(), "the main switch must stop shape recognition entirely")
+            assertEquals(1, edits.size, "the freehand stroke is kept when recognition is off")
+        }
+    }
+
+    @Test
+    fun recognitionFiltersTheKindsTheUserDisabled() = runDesktopComposeUiTest(width = 256, height = 256) {
+        val shapes = mutableListOf<ShapeCandidate>()
+        val edits = mutableListOf<InkEdit>()
+        setContent { InkLayer(InkPage("page", emptyList()), DpSize(256.dp, 256.dp), Color.Black,
+            tool = InkTool.Pen, recognition = ShapeRecognitionSettings(enabledKinds = setOf(ShapeKind.Ellipse)),
+            onShapeRecognized = { candidate, _ -> shapes += candidate },
+            onEdit = { edit, _ -> edits += edit }) }
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput {
+            updatePointerTo(Offset(30f, 40f)); press()
+            moveTo(Offset(110f, 40f), delayMillis = 10); moveTo(Offset(200f, 40f), delayMillis = 10)
+            moveTo(Offset(200f, 110f), delayMillis = 10); moveTo(Offset(200f, 180f), delayMillis = 10)
+            moveTo(Offset(115f, 180f), delayMillis = 10); moveTo(Offset(30f, 180f), delayMillis = 10)
+            moveTo(Offset(30f, 110f), delayMillis = 10); moveTo(Offset(30f, 40f), delayMillis = 10)
+        }
+        mainClock.advanceTimeBy(1100)
+        onNodeWithTag(INK_LAYER_TAG).performMouseInput { release() }
+        runOnIdle {
+            assertTrue(shapes.isEmpty(), "a disabled kind cannot be committed")
+            assertEquals(1, edits.size)
+        }
+    }
+
+    @Test
     fun objectEraserDeletesOnlyTheTouchedFragmentAndUsesTheConfiguredSize() = runDesktopComposeUiTest(width = 160, height = 260) {
         val page = mutableStateOf(splitSelectionPage().second)
         val edits = mutableListOf<InkEdit>()

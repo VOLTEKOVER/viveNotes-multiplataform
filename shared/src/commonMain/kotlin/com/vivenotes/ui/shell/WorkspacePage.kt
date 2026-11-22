@@ -19,6 +19,7 @@ import androidx.compose.ui.input.key.KeyEvent
 import com.vivenotes.data.PictureLibrary
 import com.vivenotes.data.VideoThumbnailSource
 import com.vivenotes.model.ink.InkSelection
+import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.model.search.ContentHit
 import com.vivenotes.richtext.TextSelection
 import com.vivenotes.ui.drop.rememberFileDropHandlers
@@ -32,6 +33,7 @@ import com.vivenotes.ui.ribbon.draw.GraphMutations
 import com.vivenotes.ui.ribbon.draw.EquationGraphs
 import com.vivenotes.ui.ribbon.draw.GraphableFormulas
 import com.vivenotes.ui.ribbon.draw.DrawMath
+import com.vivenotes.workspace.InkPenSettings
 import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.ViewSettings
 import com.vivenotes.workspace.ObjectCommand
@@ -79,6 +81,8 @@ internal fun WorkspacePage(
     formulaReady: Boolean,
     drawMath: DrawMath?,
     onInkMath: (InkSelection) -> Unit,
+    onShapeRecognized: (ShapeCandidate, InkPenSettings) -> Unit = { _, _ -> },
+    onForceShapeRecognition: (InkSelection) -> Unit = {},
     applyEditorCommand: ((WorkspaceState) -> WorkspaceState) -> Unit,
     onLinkRequest: (LinkEditorRequest) -> Unit,
     debugLog: DebugLog = DebugLog(),
@@ -184,6 +188,8 @@ internal fun WorkspacePage(
         onPreparedPaste = { before, prepared -> onStateChange { it.applyPreparedCanvasPaste(before, prepared) } },
         onCreateShape = { sx, sy, ex, ey -> onStateChange { it.createShape(sx, sy, ex, ey) } },
         onStraightenStroke = { line, pen -> onStateChange { it.createStraightLine(line, pen) } },
+        onShapeRecognized = onShapeRecognized,
+        onForceShapeRecognition = onForceShapeRecognition,
         onCreateTextBox = { x, y ->
             // Decided on what is on screen: a box placed there is the one that types next.
             val focusMoves = state.createTextBox(x, y).focusedTextOutlineId != state.focusedTextOutlineId

@@ -28,6 +28,7 @@ import com.vivenotes.model.ink.InkSelection
 import com.vivenotes.ui.components.HoverTooltip
 import com.vivenotes.ui.components.TooltipIconButton
 import com.vivenotes.ui.icons.DocumentSymbols
+import com.vivenotes.ui.icons.DrawSymbols
 import com.vivenotes.ui.icons.ObjectSymbols
 import com.vivenotes.ui.shell.WorkspaceTestTags
 import kotlin.math.roundToInt
@@ -48,6 +49,7 @@ internal fun InkSelectionToolkit(selection: InkSelection, boundsInView: Rect, vi
     onBoundsChange: (Rect) -> Unit, onCopy: () -> Unit, onDelete: () -> Unit, onColor: (Int, Boolean) -> Unit,
     showGroup: Boolean, showMath: Boolean, onGroup: () -> Unit, onMath: () -> Unit,
     grouped: Boolean = selection.isGrouped,
+    showForceRecognition: Boolean = false, onForceRecognition: () -> Unit = {},
 ) {
     var size by remember { mutableStateOf(IntSize.Zero) }
     val gap = with(LocalDensity.current) { 6.dp.toPx() }
@@ -82,6 +84,15 @@ internal fun InkSelectionToolkit(selection: InkSelection, boundsInView: Rect, vi
                     Spacer(Modifier.width(5.dp))
                     Text(Strings.math, style = MaterialTheme.typography.labelSmall)
                 }
+            }
+            if (showForceRecognition) TextButton(onClick = onForceRecognition, enabled = enabled,
+                colors = ButtonDefaults.textButtonColors(contentColor = foreground,
+                    disabledContentColor = foreground.copy(alpha = .38f)),
+                contentPadding = PaddingValues(horizontal = 7.dp),
+                modifier = Modifier.height(32.dp).testTag(WorkspaceTestTags.InkForceRecognition)) {
+                Icon(DrawSymbols.Shape, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(Strings.force_shape_recognition, style = MaterialTheme.typography.labelSmall)
             }
             if (showGroup) SelectionGroupButton(grouped, enabled, onGroup)
             TooltipIconButton(Strings.delete_selection, onClick = onDelete, enabled = enabled,

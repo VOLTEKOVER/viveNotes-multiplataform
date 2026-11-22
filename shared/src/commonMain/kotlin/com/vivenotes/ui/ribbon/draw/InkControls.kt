@@ -42,6 +42,7 @@ internal object InkControlsTags {
     const val Pressure = "draw-ink-pressure"
     const val Stabilization = "draw-ink-stabilization"
     const val Hold = "draw-ink-hold-straight"
+    const val HoldShape = "draw-ink-hold-shape"
     const val WheelButton = "draw-ink-wheel-button"
     const val Wheel = "draw-ink-wheel"
     const val WheelPreview = "draw-ink-wheel-preview"
@@ -97,6 +98,10 @@ internal fun PenKit(index: Int, settings: InkSettings, canvasInk: Color, onChang
         ToolkitToggle(Strings.hold_for_straight_line, pen.holdForStraightLine, InkControlsTags.Hold,
             Strings.draw_a_line_and_pause_with_the_pen_still_down_for) {
             update(pen.copy(holdForStraightLine = it))
+        }
+        ToolkitToggle(Strings.hold_for_shape, pen.holdForShape, InkControlsTags.HoldShape,
+            Strings.draw_a_shape_and_pause_with_the_pen_still_down_for) {
+            update(pen.copy(holdForShape = it))
         }
         ToolkitSlider(Strings.thickness, pen.sizeDp, 1f..8f, .5f, InkControlsTags.Width, color) { update(pen.copy(sizeDp = it)) }
         Spacer(Modifier.height(2.dp))

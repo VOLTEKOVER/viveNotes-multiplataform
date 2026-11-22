@@ -274,6 +274,16 @@
     <string name="nothing_to_calculate_automatically_open_it_in_the_panel_for_every">Nothing to calculate automatically. Open it in the panel for every action.</string>
     <string name="hold_for_straight_line">Hold for straight line</string>
     <string name="draw_a_line_and_pause_with_the_pen_still_down_for">Draw a line and pause with the pen still down for a second: the stroke is replaced by a straight line you can move and resize. Lift without pausing and the freehand stroke stays. Nearly horizontal and nearly vertical lines are levelled.</string>
+    <string name="hold_for_shape">Hold for shape</string>
+    <string name="draw_a_shape_and_pause_with_the_pen_still_down_for">Draw a shape and pause with the pen still down for a second: the stroke is replaced by a shape you can move and resize. Lift without pausing and the freehand stroke stays.</string>
+    <string name="shape_recognition">Shape recognition</string>
+    <string name="force_shape_recognition">Force shape recognition</string>
+    <string name="automatic_shape_recognition">Automatic shape recognition</string>
+    <string name="automatic_shape_recognition_hint">Turn a held ink stroke into a selected shape. The pen's own Hold for shape switch still applies.</string>
+    <string name="shapes_to_recognize">Shapes to recognize</string>
+    <string name="basic_shapes">Basic shapes</string>
+    <string name="solid_shapes">Solid shapes</string>
+    <string name="no_shapes_selected">No shapes selected: held ink stays as ink.</string>
     <string name="thickness">Thickness</string>
     <string name="pressure">Pressure</string>
     <string name="how_much_harder_pressing_thickens_the_line_0_turns_off_pressure">How much harder pressing thickens the line. 0 turns off pressure response; the broad nib still makes downstrokes and cross-strokes different.</string>
