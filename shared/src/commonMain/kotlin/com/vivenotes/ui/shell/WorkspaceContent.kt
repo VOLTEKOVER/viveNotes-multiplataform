@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -29,7 +30,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -82,6 +86,7 @@ import com.vivenotes.workspace.InputSettings
 import com.vivenotes.workspace.KeyBindings
 import com.vivenotes.workspace.LocalPenHaptics
 import com.vivenotes.workspace.NavigationActions
+import com.vivenotes.workspace.PenHardwareEvents
 import com.vivenotes.workspace.PenAction
 import com.vivenotes.workspace.PenKeyBinding
 import com.vivenotes.workspace.RibbonTab
@@ -310,8 +315,18 @@ internal fun WorkspaceContent(
             openPane = DockedPane.Search
             searchFocusTick++
         } },
-        penHaptics = LocalPenHaptics.current)
+        penHaptics = LocalPenHaptics.current, debugLog = debugLog)
     val currentShortcuts by rememberUpdatedState(shortcuts)
+    // A platform that sees a pen button outside Compose's pointer stream hands the press here.
+    DisposableEffect(Unit) {
+        val previous = PenHardwareEvents.onBarrel
+        PenHardwareEvents.onBarrel = {
+            val action = currentPenButtons.barrel
+            debugLog.event("input") { "pen barrel native action=$action" }
+            if (action != PenAction.None) currentShortcuts.pen(action)
+        }
+        onDispose { PenHardwareEvents.onBarrel = previous }
+    }
     LaunchedEffect(state.navigationVisible, state.pageListVisible) {
         debugLog.event("navigation") { "visibility notebooks=${state.navigationVisible} pages=${state.pageListVisible}" }
     }
@@ -324,6 +339,11 @@ internal fun WorkspaceContent(
                 // Shortcuts are dispatched from one table (Settings → Hardware lists and rebinds it):
                 // here ahead of the focused control, after it below, and in the text box being edited.
                 .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown) {
+                        currentPenButtons.bindingFor(event.key.keyCode)?.let { binding ->
+                            debugLog.event("input") { "pen key code=${binding.code} action=${binding.action}" }
+                        }
+                    }
                     shortcutKeys.dismiss(event) {
                         if (state.filePane.docked && fileActions != null) {
                             fileActions.closePane()
@@ -365,6 +385,12 @@ internal fun WorkspaceContent(
                                 event.buttons.isSecondaryPressed, event.buttons.isTertiaryPressed, currentPenButtons)
                             secondary = event.buttons.isSecondaryPressed
                             tertiary = event.buttons.isTertiaryPressed
+                            if (action != null && action != PenAction.None) {
+                                debugLog.event("input") {
+                                    "pen barrel action=$action secondary=${event.buttons.isSecondaryPressed} " +
+                                        "tertiary=${event.buttons.isTertiaryPressed}"
+                                }
+                            }
                             if (action == null || action == PenAction.None) continue
                             if (currentShortcuts.pen(action)) event.changes.forEach { it.consume() }
                         }

@@ -11,6 +11,19 @@ import kotlin.test.assertEquals
 
 class InputSettingsFileTest {
     @Test
+    fun aPenSideButtonSelectsUntilTheFileChoosesOtherwise() {
+        val directory = Files.createTempDirectory("input-settings").toFile()
+        try {
+            val store = InputSettingsFile(File(directory, "config/input.properties"))
+            assertEquals(PenAction.Lasso, store.load().penButtons.barrel)
+            store.save(InputSettings(penButtons = PenButtonSettings(barrel = PenAction.Eraser)))
+            assertEquals(PenAction.Eraser, InputSettingsFile(File(directory, "config/input.properties")).load().penButtons.barrel)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    @Test
     fun aFingerDoesNotDrawUntilChosenAndTheChoiceIsKept() {
         val directory = Files.createTempDirectory("input-settings").toFile()
         try {

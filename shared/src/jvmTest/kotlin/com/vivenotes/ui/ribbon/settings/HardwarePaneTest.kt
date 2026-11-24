@@ -146,7 +146,7 @@ class HardwarePaneTest {
         onNodeWithTag(HardwareTags.kind(HardwareKind.Stylus)).performClick().assertIsSelected()
 
         onNodeWithTag(HardwareTags.PenBarrel).performScrollTo().assertTextContains(Strings.pen_button)
-            .assertTextContains(PenAction.TogglePenEraser.label)
+            .assertTextContains(PenAction.Lasso.label)
         onNodeWithTag(HardwareTags.PenBarrel2).assertTextContains(Strings.pen_second_button)
             .assertTextContains(PenAction.None.label)
         repeat(PenButtonSettings.KEY_SLOTS) { slot ->
@@ -180,10 +180,10 @@ class HardwarePaneTest {
         press(listOf(Key.PrintScreen))
 
         onNodeWithTag(ShortcutDialogTags.PenKeyCapture).assertDoesNotExist()
-        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.None)
+        val printScreen = PenKeyBinding(Key.PrintScreen.keyCode, Key.PrintScreen.penKeyLabel(), PenAction.Undo)
         runOnIdle { assertEquals(InputSettings(penButtons = PenButtonSettings().withKey(0, printScreen)), saved) }
         onNodeWithTag(HardwareTags.penKey(0)).assertTextContains(Key.PrintScreen.penKeyLabel())
-        onNodeWithTag(HardwareTags.penKeyAction(0)).assertTextContains(PenAction.None.label).assertIsEnabled()
+        onNodeWithTag(HardwareTags.penKeyAction(0)).assertTextContains(PenAction.Undo.label).assertIsEnabled()
 
         onNodeWithTag(HardwareTags.penKeyAction(0)).performClick()
         onNodeWithTag(HardwareTags.penAction(PenAction.Pen2)).performClick()

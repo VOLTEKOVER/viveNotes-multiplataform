@@ -14,7 +14,7 @@ import javax.swing.SwingUtilities
 internal object DesktopPointerSource {
     private val attached = WeakHashMap<Window, Unit>()
 
-    fun attach(window: Window, injector: ComposeTouchInjector, log: DebugLog) {
+    fun attach(window: Window, injector: ComposeTouchInjector, log: DebugLog, onNativeAttached: () -> Unit = {}) {
         check(SwingUtilities.isEventDispatchThread())
         if (!injector.hasComposeContent(window)) return
         if (attached.put(window, Unit) != null) return
@@ -57,6 +57,9 @@ internal object DesktopPointerSource {
                 // a promoted mouse press racing a native stylus press on AWT's separate queue.
                 if (!wayland) queue.nativeMouseWindows[window] = { source.isReady }
                 log.event("input") { "native pointers attached: ${source.backend}" }
+                // A hook installed after ByteInk's is called first and can read PEN_FLAGS before
+                // ByteInk replaces the WM_POINTER message with WM_NULL.
+                onNativeAttached()
             } catch (failure: Exception) {
                 stop()
                 log.failure("input", "attach native pointers", failure)

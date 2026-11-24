@@ -19,7 +19,7 @@ internal class InputSettingsFile(private val file: File) {
             // rather than the entry that happened to take its place in this version.
             penButtons = PenButtonSettings(
                 barrel = values.getProperty("penBarrel")?.let(PenAction::decode)
-                    ?: PenAction.TogglePenEraser,
+                    ?: PenButtonSettings().barrel,
                 barrel2 = values.getProperty("penBarrel2")?.let(PenAction::decode) ?: PenAction.None,
                 keys = List(PenButtonSettings.KEY_SLOTS) { slot ->
                     values.getProperty("penKey${slot + 1}")

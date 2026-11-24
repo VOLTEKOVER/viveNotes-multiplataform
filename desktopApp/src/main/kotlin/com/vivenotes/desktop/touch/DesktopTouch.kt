@@ -92,18 +92,18 @@ internal object DesktopTouch {
 
     private fun injector(log: DebugLog): ComposeTouchInjector = injector ?: ComposeTouchInjector(log).also { injector = it }
 
-    fun attachPointers(window: Window, log: DebugLog) {
+    fun attachPointers(window: Window, log: DebugLog, onNativeAttached: () -> Unit = {}) {
         if (!enabled) return
         if (!observingWindows) {
             observingWindows = true
             window.toolkit.addAWTEventListener({ event ->
                 if (event is WindowEvent && event.id == WindowEvent.WINDOW_OPENED) {
                     attachX11(event.window, log)
-                    DesktopPointerSource.attach(event.window, injector(log), log)
+                    DesktopPointerSource.attach(event.window, injector(log), log, onNativeAttached)
                 }
             }, java.awt.AWTEvent.WINDOW_EVENT_MASK)
         }
-        DesktopPointerSource.attach(window, injector(log), log)
+        DesktopPointerSource.attach(window, injector(log), log, onNativeAttached)
     }
 
     private var observingWindows = false

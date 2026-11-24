@@ -192,9 +192,10 @@ internal fun PenKeyCaptureDialog(
                                 val code = event.key.keyCode
                                 // Key 0 is Compose's "unknown key", which nothing can bind. A key
                                 // keeps doing what it did when it moves slots; a new key on a
-                                // configured row keeps the row's action.
+                                // configured row keeps the row's action; an empty one starts with
+                                // Undo, so the button works before anything is picked.
                                 val binding = if (code == 0L) null else PenKeyBinding(code, event.key.penKeyLabel(),
-                                    current?.action ?: buttons.bindingFor(code)?.action ?: PenAction.None)
+                                    current?.action ?: buttons.bindingFor(code)?.action ?: PenAction.Undo)
                                 // A key no other slot has is taken at once, as a chord without a
                                 // conflict is; one another slot has waits for Replace.
                                 if (binding != null) {

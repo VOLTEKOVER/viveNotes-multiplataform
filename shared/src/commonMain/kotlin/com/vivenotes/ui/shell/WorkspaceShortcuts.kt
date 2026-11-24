@@ -1,5 +1,6 @@
 package com.vivenotes.ui.shell
 
+import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.model.Mark
 import com.vivenotes.ui.canvas.TextClipboardActions
 import com.vivenotes.ui.ribbon.view.ViewActions
@@ -29,6 +30,7 @@ internal class WorkspaceShortcuts(
     private val onSearch: (() -> Unit)? = null,
     /** The pen's own motor, when it has one: it clicks as one of its commands runs. */
     private val penHaptics: PenHaptics? = null,
+    private val debugLog: DebugLog? = null,
 ) {
     fun run(action: ShortcutAction): Boolean {
         val current = state()
@@ -105,6 +107,7 @@ internal class WorkspaceShortcuts(
             }
         }
         if (ran) penHaptics?.commandClick()
+        debugLog?.event("input") { "pen command action=$action ran=$ran" }
         return ran
     }
 

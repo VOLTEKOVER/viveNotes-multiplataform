@@ -15,6 +15,7 @@ import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.vivenotes.App
 import com.vivenotes.desktop.pen.WindowsPenHaptics
+import com.vivenotes.desktop.pen.WindowsPenWatch
 import com.vivenotes.desktop.titlebar.TitleBar
 import com.vivenotes.desktop.touch.DesktopTouch
 import com.vivenotes.desktop.update.DesktopUpdates
@@ -23,6 +24,7 @@ import com.vivenotes.localization.Localization
 import com.vivenotes.typst.JvmTypstRenderer
 import com.vivenotes.workspace.LocalPenHaptics
 import com.vivenotes.workspace.PenHaptics
+import com.vivenotes.workspace.PenHardwareEvents
 import kotlinx.coroutines.runBlocking
 import java.awt.Dimension
 
@@ -109,7 +111,14 @@ private fun launchStandardWindow(notes: DesktopNotes, profile: DesktopProfile, l
                 window.minimumSize = Dimension(720.coerceAtMost(monitor.workArea.width),
                     540.coerceAtMost(monitor.workArea.height))
                 DesktopTouch.attachX11(window, log)
-                DesktopTouch.attachPointers(window, log)
+                DesktopTouch.attachPointers(window, log) {
+                    // ByteInk installs its hook when the native source starts. Reinstall ours after
+                    // it so this watch sees WM_POINTER and its PEN_FLAGS before ByteInk nulls the
+                    // message; the barrel button and flip-to-erase live in those flags.
+                    WindowsPenWatch.detach()
+                    WindowsPenWatch.attach(log)
+                    WindowsPenWatch.onBarrel = { PenHardwareEvents.onBarrel?.invoke() }
+                }
                 CopyOnlyDrops.install(window, log)
             }
             // The pen's own motor, where Windows offers one. The setting gates what reaches the

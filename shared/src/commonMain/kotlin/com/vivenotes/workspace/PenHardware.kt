@@ -69,8 +69,8 @@ data class PenKeyBinding(val code: Long, val label: String, val action: PenActio
  * driver spells decides the key, and the slots only choose what it does.
  */
 data class PenButtonSettings(
-    /** The lower barrel button, which Windows reports as the secondary pointer button. */
-    val barrel: PenAction = PenAction.TogglePenEraser,
+    /** The lower barrel button: the side button selects by default, as the stylus key does. */
+    val barrel: PenAction = PenAction.Lasso,
     /** The upper barrel button, when there is one: Windows reports it as the tertiary button. */
     val barrel2: PenAction = PenAction.None,
     /** The pen's extra keys, in the Hardware pane's three slots; null is a slot with no key. */
@@ -122,6 +122,16 @@ data class PenButtonSettings(
 }
 
 /**
+ * Pen hardware a platform sees outside Compose's pointer stream. Windows reads the barrel
+ * button from a WM_POINTER flag ByteInk does not forward, so its driver calls here with the
+ * press; the workspace answers with whatever its Hardware pane bound to that button.
+ */
+object PenHardwareEvents {
+    /** Set while the workspace is on screen; null when no workspace is listening. */
+    @Volatile var onBarrel: (() -> Unit)? = null
+}
+
+/**
  * The action a newly pressed barrel button runs, from the button that just went down: the
  * secondary button the barrel's action, the tertiary the second barrel's. A button that was
  * already held runs nothing — holding barrel and tip together is one press of each, not a repeat.
@@ -148,11 +158,11 @@ internal fun penBarrelAction(
  * [PenAction.Redo] act on the page rather than on the hand, and [PenAction.Lasso] arms the
  * desktop's object lasso rather than a tool, which [WorkspaceState.armPenAction] handles first.
  *
- * [PenAction.TogglePenEraser] is the one entry with a rule rather than an answer, and it is the
- * barrel's default: with a pen in hand it reaches for the eraser, with anything else in hand it
- * reaches back for [currentPen] — the pen last in hand — so writing in blue, erasing, and
- * clicking again carries on in blue. [PenAction.CyclePens] is the other rule — it walks the
- * three pens and wraps.
+ * [PenAction.Lasso] is the barrel's default, so the side button selects objects.
+ * [PenAction.TogglePenEraser] is the one entry with a rule rather than an answer: with a pen in
+ * hand it reaches for the eraser, with anything else in hand it reaches back for [currentPen] —
+ * the pen last in hand — so writing in blue, erasing, and clicking again carries on in blue.
+ * [PenAction.CyclePens] is the other rule — it walks the three pens and wraps.
  */
 internal fun inkToolFrom(action: PenAction, current: InkTool?, currentPen: Int): Pair<InkTool, Int>? = when (action) {
     PenAction.None, PenAction.Undo, PenAction.Redo, PenAction.Lasso -> null

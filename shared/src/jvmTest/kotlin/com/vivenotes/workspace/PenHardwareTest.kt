@@ -15,6 +15,11 @@ import kotlin.test.assertTrue
 class PenHardwareTest {
 
     @Test
+    fun theSideButtonSelectsByDefault() {
+        assertEquals(PenAction.Lasso, PenButtonSettings().barrel)
+    }
+
+    @Test
     fun togglingSwapsBetweenThePenInHandAndTheEraser() {
         assertEquals(InkTool.Eraser to 1, inkToolFrom(PenAction.TogglePenEraser, InkTool.Pen, 1))
         assertEquals(InkTool.Pen to 2, inkToolFrom(PenAction.TogglePenEraser, InkTool.Eraser, 2))

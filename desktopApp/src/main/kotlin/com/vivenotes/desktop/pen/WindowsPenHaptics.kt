@@ -61,16 +61,18 @@ private const val SLOT_KNOWN_PENCIL = 14L
  * and a pen that resolves to nothing is remembered as nothing rather than asked again — a pen
  * without a motor stays silent without a native call per stroke.
  */
-internal class WindowsPenHaptics private constructor(private val native: Native) : PenHaptics {
+internal class WindowsPenHaptics private constructor(
+    private val native: Native,
+    private val log: DebugLog,
+) : PenHaptics {
 
     companion object {
         /** Null when this machine cannot drive a pen's motor — the workspace writes on without it. */
         fun create(log: DebugLog): WindowsPenHaptics? {
             if (!System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) return null
             return try {
-                val haptics = WindowsPenHaptics(Native())
-                // A watch that fails leaves command clicks silent; the writing textures stay.
-                if (!WindowsPenWatch.attach(log)) log.event("input") { "pen command clicks unavailable" }
+                val haptics = WindowsPenHaptics(Native(), log)
+                log.event("input") { "pen haptics driver ready" }
                 haptics
             } catch (failure: Throwable) {
                 log.failure("input", "start pen haptics", failure)
@@ -86,10 +88,20 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
     private var resolved: Pen? = null
 
     override fun inkStart(pointerId: Long, feel: PenHapticFeel) {
-        val pen = penFor(pointerId) ?: return
-        val waveform = inkFeedbackWaveform(pen.waveforms, native.waveformOf(feel), native.ink) ?: return
+        // Compose numbers injected pointers itself; the native id the motor needs is kept at
+        // the first pen sample. Fall back to the gesture's id only before one has arrived.
+        val nativeId = PenPointerIdentity.stylusId.takeIf { it > 0L } ?: pointerId
+        val pen = penFor(nativeId) ?: return
+        val wanted = native.waveformOf(feel)
+        val waveform = inkFeedbackWaveform(pen.waveforms, wanted, native.ink)
+        log.event("input") {
+            "ink haptics compose=$pointerId native=$nativeId feel=$feel wanted=$wanted chosen=$waveform"
+        }
+        if (waveform == null) return
         val feedback = pen.feedbackOf(waveform) ?: return
-        if (native.sendFeedback(pen.controller, feedback) == 0) vibrating = true
+        val result = native.sendFeedback(pen.controller, feedback)
+        log.event("input") { "ink haptics sent result=$result" }
+        if (result == 0) vibrating = true
     }
 
     override fun inkEnd() {
@@ -101,10 +113,13 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
     override fun commandClick() {
         // The pen behind the pressed key: the one Windows last spoke of, which stays valid while
         // the pen is in range — a pen that left leaves its clicks silent.
-        val id = WindowsPenWatch.lastPenPointerId
+        val id = PenPointerIdentity.stylusId.takeIf { it > 0L } ?: WindowsPenWatch.lastPenPointerId
+        log.event("input") { "pen key click pointer=$id" }
         if (id <= 0) return
         val pen = penFor(id) ?: return
-        val waveform = commandFeedbackWaveform(pen.waveforms, native.click, native.press) ?: return
+        val waveform = commandFeedbackWaveform(pen.waveforms, native.click, native.press)
+        log.event("input") { "pen key click chosen waveform=$waveform" }
+        if (waveform == null) return
         val feedback = pen.feedbackOf(waveform) ?: return
         native.sendFeedback(pen.controller, feedback)
     }
@@ -121,6 +136,7 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
             pen?.let { native.stopFeedback(it.controller) }
         }
         pen?.release(native)
+        WindowsPenWatch.onBarrel = null
         WindowsPenWatch.detach()
         native.close()
     }
@@ -131,17 +147,28 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
         if (pointerId == resolvedId) return resolved
         resolved?.release(native)
         resolvedId = pointerId
-        resolved = try { resolve(pointerId) } catch (ignored: Throwable) { null }
+        resolved = try { resolve(pointerId) } catch (failure: Throwable) {
+            log.failure("input", "resolve pen motor for pointer $pointerId", failure)
+            null
+        }
+        log.event("input") {
+            "pen motor for pointer $pointerId: ${if (resolved == null) "none (${native.diagnosis})" else "linked"}"
+        }
         return resolved
     }
 
     /** PenDevice.GetFromPointerId → the pen's controller, and what the controller can play. */
     private fun resolve(pointerId: Long): Pen? {
+        native.diagnosis = "start"
         val device = native.fromPointerId(pointerId) ?: return null
         val pen2 = native.queryInterface(device, native.penDevice2Id) ?: return null
+        native.diagnosis = "IPenDevice2"
         val controller = native.readObject(pen2, SLOT_PEN_HAPTICS_CONTROLLER) ?: return null
+        native.diagnosis = "controller"
         val vector = native.readObject(controller, SLOT_SUPPORTED_FEEDBACK) ?: return null
+        native.diagnosis = "supported feedback"
         val size = native.vectorSize(vector)
+        if (size == 0) { native.diagnosis = "no supported feedback"; return null }
         val feedbacks = ArrayList<MemorySegment>(size)
         val waveforms = ArrayList<Int>(size)
         for (index in 0 until size) {
@@ -190,6 +217,8 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
         val penDevice2Id = guid(34067239, 32696, 21862, iidBytes(140, 52, 248, 52, 32, 55, 183, 249))
 
         val penDeviceStatics: MemorySegment
+        /** Where the last resolve stopped, for the debug log when a pen has no motor. */
+        var diagnosis: String = ""
         val click: Int
         val press: Int
         val ink: Int
@@ -244,20 +273,41 @@ internal class WindowsPenHaptics private constructor(private val native: Native)
         /** PenDevice.GetFromPointerId: the pen behind an id, while that pen is in range. */
         fun fromPointerId(pointerId: Long): MemorySegment? {
             val out = arena.allocate(8L)
-            if (call(penDeviceStatics, SLOT_PEN_FROM_POINTER_ID, fGetAt, pointerId.toInt(), out) != 0) return null
-            return readObjectAt(out)
+            val hr = call(penDeviceStatics, SLOT_PEN_FROM_POINTER_ID, fGetAt, pointerId.toInt(), out)
+            if (hr != 0) {
+                diagnosis = "GetFromPointerId hr=0x${hr.toUInt().toString(16)}"
+                return null
+            }
+            val device = readObjectAt(out)
+            if (device == null) diagnosis = "GetFromPointerId returned no device"
+            return device
         }
 
         fun queryInterface(target: MemorySegment, iid: MemorySegment): MemorySegment? {
             val out = arena.allocate(8L)
-            if (call(target, SLOT_QUERY_INTERFACE, fQueryInterface, iid, out) != 0) return null
-            return readObjectAt(out)
+            val hr = call(target, SLOT_QUERY_INTERFACE, fQueryInterface, iid, out)
+            if (hr != 0) {
+                diagnosis = "QueryInterface hr=0x${hr.toUInt().toString(16)}"
+                return null
+            }
+            val result = readObjectAt(out)
+            if (result == null) diagnosis = "QueryInterface returned no IPenDevice2"
+            return result
         }
 
         fun readObject(target: MemorySegment, slot: Long): MemorySegment? {
             val out = arena.allocate(8L)
-            if (call(target, slot, fGetProperty, out) != 0) return null
-            return readObjectAt(out)
+            val hr = call(target, slot, fGetProperty, out)
+            if (hr != 0) {
+                diagnosis = "property slot $slot hr=0x${hr.toUInt().toString(16)}"
+                return null
+            }
+            val result = readObjectAt(out)
+            if (result == null) diagnosis = when (slot) {
+                SLOT_PEN_HAPTICS_CONTROLLER -> "no motor: pen not connected over Bluetooth"
+                else -> "property slot $slot returned null"
+            }
+            return result
         }
 
         fun readU16(target: MemorySegment, slot: Long): Int? {

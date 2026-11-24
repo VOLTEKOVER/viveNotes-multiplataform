@@ -4,10 +4,32 @@ import androidx.compose.ui.input.pointer.PointerType
 import androidx.ink.brush.InputToolType
 import com.vivenotes.byteink.compose.InkInputEvent
 import com.vivenotes.byteink.compose.InkPointerSample
+import com.vivenotes.desktop.pen.PenPointerIdentity
 import java.awt.Frame
 import kotlin.test.*
 
 class NativePointerFramesTest {
+    @Test fun aStylusBeginKeepsTheNativeIdThePenMotorIsAddressedBy() {
+        val window = Frame()
+        PenPointerIdentity.clear()
+        try {
+            val frames = mutableListOf<TouchFrame>()
+            val source = NativePointerFrames(window, mouse = true, touch = true, emit = { frames += it })
+            val stylus = InkPointerSample(10f, 10f, 10, InputToolType.STYLUS)
+            source.accept(InkInputEvent.Begin(InkPointerSample(1f, 1f, 1, InputToolType.TOUCH), 4))
+            source.accept(InkInputEvent.Begin(InkPointerSample(2f, 2f, 2, InputToolType.MOUSE), 5))
+            assertEquals(-1L, PenPointerIdentity.stylusId, "a finger or mouse is not a pen")
+
+            source.accept(InkInputEvent.Begin(stylus, 42))
+            assertEquals(42L, PenPointerIdentity.stylusId)
+            source.accept(InkInputEvent.Finish(stylus, 42))
+            assertEquals(42L, PenPointerIdentity.stylusId, "the last pen stays for later key clicks")
+        } finally {
+            PenPointerIdentity.clear()
+            window.dispose()
+        }
+    }
+
     @Test fun nativeHistoryPreservesPressureTypeTimeAndFinalPositionWithoutPredictions() {
         val window = Frame()
         try {
@@ -24,6 +46,20 @@ class NativePointerFramesTest {
             assertTrue(real.all { it.pointers.single().type == PointerType.Stylus })
             assertEquals(13.0, real.last().pointers.single().x)
             assertFalse(real.last().pointers.single().pressed)
+        } finally { window.dispose() }
+    }
+
+    @Test fun anInvertedPenComesThroughAsAnEraserPointer() {
+        val window = Frame()
+        try {
+            val events = mutableListOf<TouchDispatch<String>>()
+            val tracker = TouchPointerTracker<String>({ _, _, _ -> "canvas" })
+            val source = NativePointerFrames(window, mouse = false, touch = false,
+                emit = { events += tracker.accept(it) }, inverted = { it == 42L })
+            val sample = InkPointerSample(10f, 10f, 10, InputToolType.STYLUS)
+            source.accept(InkInputEvent.Begin(sample, 42))
+            val real = events.filterIsInstance<TouchDispatch.Event<String>>()
+            assertEquals(listOf(PointerType.Eraser), real.map { it.pointers.single().type })
         } finally { window.dispose() }
     }
 
