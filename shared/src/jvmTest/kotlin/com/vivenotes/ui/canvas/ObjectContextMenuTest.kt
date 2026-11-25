@@ -264,6 +264,26 @@ class ObjectContextMenuTest {
         }
     }
 
+    @Test
+    fun rightClickingAShapeOffersChangeStyleAndReseedsItInPlace() =
+        runDesktopComposeUiTest(width = 1400, height = 900) {
+            var observed = workspace(listOf(shape(SHAPE, 300f))).selectObject(SHAPE)
+            setWorkspace(observed) { observed = it }
+
+            onNodeWithTag(WorkspaceTestTags.primeObject(SHAPE)).performMouseInput { rightClick(center) }
+            onNodeWithTag(com.vivenotes.ui.ribbon.draw.ShapeStyleMenuTags.Change).performClick()
+            onNodeWithTag(com.vivenotes.ui.ribbon.draw.ShapeStyleMenuTags.variant(ShapeKind.RoundedRectangle))
+                .performClick()
+
+            runOnIdle {
+                val result = shapes(observed).single()
+                assertEquals(SHAPE, result.id, "the shape is replaced, not duplicated")
+                assertEquals(ShapeKind.RoundedRectangle, result.kind)
+                assertEquals(8, result.segments.size, "the rounded variant is reseeded with its arcs")
+                assertEquals(300f, result.x, 0.01f)
+            }
+        }
+
     private fun shape(id: String, x: Float) = Outline.Shape(id = id, kind = ShapeKind.Rectangle,
         segments = seedSegments(ShapeKind.Rectangle, x, 350f, x + 120f, 430f, nextId = ::newId)).withRecomputedBounds()
 

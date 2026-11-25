@@ -1,21 +1,22 @@
 package com.vivenotes.workspace
 
+import com.vivenotes.model.ink.PAGE_BASIC
 import com.vivenotes.model.ink.ShapeKind
 
 /**
  * App-wide choices for turning held ink into an editable shape.
  *
  * [automatic] is the main switch: with it off the hold gesture never looks for a shape, whatever the
- * pen's own `holdForShape` says. [enabledKinds] is the second gate: a disabled kind cannot win or
- * hide an enabled runner-up in `ShapeFit`. An empty set recognizes nothing, which is a valid choice.
+ * pen's own `holdForShape` says. [enabledKinds] is the second gate: recognition compares only mother
+ * shapes from enabled families. 3D solids are never recognized. An empty set recognizes nothing.
  */
 data class ShapeRecognitionSettings(
     val automatic: Boolean = true,
-    val enabledKinds: Set<ShapeKind> = ShapeKind.entries.toSet(),
+    val enabledKinds: Set<ShapeKind> = ShapeKind.onPage(PAGE_BASIC).toSet(),
 ) {
     /** Keeps enum order and drops names from a newer app that this build does not know. */
     fun normalized(): ShapeRecognitionSettings = copy(
-        enabledKinds = ShapeKind.entries.filter { it in enabledKinds }.toSet(),
+        enabledKinds = ShapeKind.onPage(PAGE_BASIC).filter { it in enabledKinds }.toSet(),
     )
 
     fun allows(kind: ShapeKind): Boolean = automatic && kind in enabledKinds

@@ -1,5 +1,6 @@
 package com.vivenotes.desktop
 
+import com.vivenotes.model.ink.PAGE_BASIC
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.workspace.ShapeRecognitionSettings
 import java.io.File
@@ -11,10 +12,10 @@ internal class RecognitionSettingsFile(private val file: File) {
         val values = file.readProperties() ?: return ShapeRecognitionSettings.Default
         val savedKinds = values.getProperty("enabledKinds")
         val enabledKinds = when (savedKinds) {
-            null -> ShapeKind.entries.toSet()
+            null -> ShapeRecognitionSettings.Default.enabledKinds
             // A saved blank line means the user unchecked everything, not an older file.
             else -> savedKinds.split(',').mapNotNull { name ->
-                ShapeKind.entries.firstOrNull { it.name == name }
+                ShapeKind.entries.firstOrNull { it.name == name && it.page == PAGE_BASIC }
             }.toSet()
         }
         return ShapeRecognitionSettings(

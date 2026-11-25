@@ -215,6 +215,7 @@ internal fun PageCanvas(
     onShapeLineType: (LineType) -> Unit,
     onShapeWidth: (Int) -> Unit,
     onShapeFill: (Int?) -> Unit,
+    onShapeKind: (ShapeKind) -> Unit = {},
     onMoveShapeEnd: (String, Boolean, Float, Float, Boolean) -> Unit,
     onMoveShapeArm: (String, ShapeArm, Float, Boolean) -> Unit,
     onMoveShapeVertex: (String, Int, Float, Float, Boolean) -> Unit = { _, _, _, _, _ -> },
@@ -1013,7 +1014,11 @@ internal fun PageCanvas(
                     InkLayer(page.ink, canvasSize, shapeInk, visibleWindow, page.id,
                         state.inkTool.takeIf { inkEnabled && it != InkTool.Laser }, page.document.style.titleFloor, onInkEdit, zoom,
                         state.eraserMode, state.inkSettings, state.selectedInk, interaction.inkDragOffset, state.activePenIndex,
-                        ruler, recognition = state.recognitionSettings, onStraightenStroke, onShapeRecognized)
+                        ruler, recognition = state.recognitionSettings, onStraightenStroke) { candidate, pen ->
+                        interaction.awaitingRecognitionStyle = true
+                        interaction.objectMenu = null
+                        onShapeRecognized(candidate, pen)
+                    }
                     interaction.searchInkBounds?.let { bounds ->
                         Box(Modifier.offset(bounds.left.dp, bounds.top.dp)
                             .size((bounds.right - bounds.left).coerceAtLeast(1f).dp,
@@ -1150,6 +1155,30 @@ internal fun PageCanvas(
                     interaction.pastePoint = null
                 }, modifier = Modifier.testTag(WorkspaceTestTags.CanvasPaste))
         }
+        // A recognized shape arrives as a normal selection one composition later. Open its style menu
+        // then; any other command that changes the selection leaves the flag untouched.
+        if (interaction.awaitingRecognitionStyle) {
+            val freshId = state.selectedObjectIds.singleOrNull()
+            LaunchedEffect(freshId, page.id) {
+                interaction.awaitingRecognitionStyle = false
+                if (freshId != null) interaction.recognitionStyleShapeId = freshId
+            }
+        }
+        val styleShape = state.selectedPrimeObjects.firstOrNull { it.id == interaction.recognitionStyleShapeId }
+            as? Outline.Shape
+        if (styleShape == null && interaction.recognitionStyleShapeId != null) {
+            SideEffect { interaction.recognitionStyleShapeId = null }
+        }
+        val styleAnchor = styleShape?.let { shape ->
+            Offset((shape.x + shape.width / 2f) * zoom * density.density - horizontalScroll.value,
+                (shape.y + shape.height / 2f) * zoom * density.density - verticalScroll.value)
+        }
+        ShapeStylePopup(styleAnchor, styleShape?.kind, page.editable, { kind ->
+            interaction.recognitionStyleShapeId = null
+            onShapeKind(kind)
+        }) {
+            interaction.recognitionStyleShapeId = null
+        }
         // Nothing left to act on — an undo, or the objects gone in a sync — closes it for good, so a
         // later selection does not bring it back.
         if (interaction.objectMenu != null && !state.hasObjectSelection) SideEffect { interaction.objectMenu = null }
@@ -1159,11 +1188,22 @@ internal fun PageCanvas(
             state.selectedObjectIds.size == 1 && state.selectedTextOutlineIds.isEmpty() && state.selectedInk == null
         }
         val menuCell = interaction.objectMenuCell
+        val menuShape = (state.selectedPrimeObjects.singleOrNull() as? Outline.Shape)?.takeIf {
+            state.selectedObjectIds.size == 1 && state.selectedTextOutlineIds.isEmpty() && state.selectedInk == null
+        }
         ObjectContextMenu(
-            own = if (menuTable == null || menuCell == null) null else { {
-                TableGridMenuItems(menuTable, menuCell.first, menuCell.second, page.editable) { edit ->
-                    interaction.objectMenu = null
-                    onTableEdit(edit)
+            own = if (menuTable == null && menuShape == null) null else { {
+                if (menuTable != null && menuCell != null) {
+                    TableGridMenuItems(menuTable, menuCell.first, menuCell.second, page.editable) { edit ->
+                        interaction.objectMenu = null
+                        onTableEdit(edit)
+                    }
+                }
+                if (menuShape != null) {
+                    ShapeStyleMenuItems(menuShape.kind, page.editable) { kind ->
+                        interaction.objectMenu = null
+                        onShapeKind(kind)
+                    }
                 }
             } },
             anchor = interaction.objectMenu?.takeIf { state.hasObjectSelection }?.let { point ->

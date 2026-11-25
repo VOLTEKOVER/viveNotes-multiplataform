@@ -135,7 +135,7 @@ class DesktopNotesTest {
         notes.start()
         openPage(notes)
         val chosen = ShapeRecognitionSettings(automatic = false,
-            enabledKinds = setOf(ShapeKind.Line, ShapeKind.Cube))
+            enabledKinds = setOf(ShapeKind.Line, ShapeKind.Arrow))
         notes.updateRecognitionSettings(chosen)
         assertEquals(chosen, RecognitionSettingsFile(file).load())
         close(notes)

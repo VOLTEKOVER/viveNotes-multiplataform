@@ -15,10 +15,13 @@ import kotlin.math.min
  * edges. Distances are measured in page units and divided by the stroke's diagonal, which makes
  * the tolerances independent of how big the shape was drawn.
  *
- * Recognition is deliberately unwilling: an open scribble, a stroke too short to read, or a flat
- * shape tied with a wireframe solid all return `null`. A wrong shape committed to the page is worse
- * than no shape at all. Two flat outlines that fit the same ink (a rectangle and a rounded one)
- * simply take the better score, since either reading is acceptable.
+ * Recognition is deliberately unwilling: an open scribble or a stroke too short to read returns
+ * `null`. A wrong shape committed to the page is worse than no shape at all.
+ *
+ * Only mother shapes are compared, never every variant: a rounded rectangle and a diamond are read
+ * as `Rectangle`, a drawn arrow as `Line`, and a right triangle as `Triangle`. The user picks the
+ * exact variant from the style menu that follows recognition. 3D solids are drawn from the shape
+ * toolkit but are never recognized.
  */
 object ShapeFit {
 
@@ -31,11 +34,11 @@ object ShapeFit {
     /** The ends of a hand-drawn closed shape need not meet exactly. */
     private const val CLOSURE_FRACTION = 0.20f
 
-    /** An arrow's shaft must dominate its bounding box; a short stub with wings is not an arrow. */
-    private const val ARROW_CHORD_FRACTION = 0.55f
-
     /** Largest error, as a fraction of the diagonal, still accepted as a match. */
     private const val MAX_MATCH_SCORE = 0.09f
+
+    /** An arrow's shaft must dominate its bounding box; a short stub with wings is not an arrow. */
+    private const val ARROW_CHORD_FRACTION = 0.55f
 
     /**
      * A real hand stroke has an occasional stray point. Dropping the worst few percent keeps one
@@ -45,35 +48,29 @@ object ShapeFit {
     private const val USER_DISTANCE_PERCENTILE = 0.92f
     private const val TEMPLATE_DISTANCE_PERCENTILE = 0.97f
 
-    /** Required lead of a flat shape over a solid (or vice versa) before we commit to either. */
-    private const val AMBIGUITY_MARGIN = 0.012f
-
     /**
-     * A drawn triangle need not be isosceles or axis-aligned. A coarse simplification of the stroke
-     * recovers its three corners; anything with more corners belongs to another shape.
+     * A hand-drawn polygon need not match a fixed template exactly. A coarse simplification of the
+     * stroke recovers its corners; the right count is what separates a triangle, a quadrilateral and
+     * a higher polygon, regardless of how the shape is rotated or where the pen started.
      */
-    private const val TRIANGLE_CORNER_FRACTION = 0.04f
-    private const val MIN_TRIANGLE_AREA_FRACTION = 0.01f
-    private const val RIGHT_ANGLE_COSINE = 0.2f
+    private const val CORNER_FRACTION = 0.04f
+    private const val MIN_POLYGON_AREA_FRACTION = 0.01f
+    /** A wireframe solid retraces interior edges; its stroke is much longer than its outline. */
+    private const val MAX_POLYGON_STROKE_RATIO = 1.25f
 
     private const val MAX_SAMPLED_POINTS = 256
 
-    /** Flat outlines that close back on themselves. */
+    /**
+     * One representative per recognized family. Variants (rounded/diamond, arrow, right triangle,
+     * …) are chosen by the user after recognition, not guessed here. Solids are not recognized.
+     */
     private val CLOSED_KINDS = listOf(
-        ShapeKind.Rectangle, ShapeKind.RoundedRectangle, ShapeKind.Ellipse,
-        ShapeKind.Triangle, ShapeKind.RightTriangle, ShapeKind.Diamond,
-        ShapeKind.Pentagon, ShapeKind.Hexagon,
+        ShapeKind.Rectangle, ShapeKind.Ellipse,
+        ShapeKind.Triangle, ShapeKind.Pentagon, ShapeKind.Hexagon,
     )
 
     /** Open flat shapes: they have two dimensions but no closure requirement. */
     private val OPEN_KINDS = listOf(ShapeKind.L, ShapeKind.Curve)
-
-    /** Wireframe solids, matched against their visible edges only; dotted hidden edges are not ink. */
-    private val SOLID_KINDS = listOf(
-        ShapeKind.Cube, ShapeKind.Pyramid, ShapeKind.Wedge, ShapeKind.Sphere,
-        ShapeKind.Cone, ShapeKind.Cylinder, ShapeKind.HollowCylinder,
-        ShapeKind.Hemisphere, ShapeKind.Frustum,
-    )
 
     /**
      * [enabledKinds] filters recognition before ambiguity is decided, so a disabled kind cannot win
@@ -81,7 +78,7 @@ object ShapeFit {
      */
     fun classify(
         points: FloatArray,
-        enabledKinds: Set<ShapeKind> = ShapeKind.entries.toSet(),
+        enabledKinds: Set<ShapeKind> = ShapeKind.onPage(PAGE_BASIC).toSet(),
     ): ShapeCandidate? {
         if (enabledKinds.isEmpty()) return null
         if (points.size < 6 || points.size % 2 != 0 || points.any { !it.isFinite() }) return null
@@ -107,12 +104,35 @@ object ShapeFit {
         val sampled = sample(points, MAX_SAMPLED_POINTS)
         val matches = ArrayList<Match>(4)
 
-        // Line: StraightLineFit does the straightness test and the axis snapping. The reported box
-        // is the union of the drawn stroke and the snapped line, so neither falls outside it.
+        // Paths: the straight line is the mother shape. A drawn arrow is recognized as a line with
+        // the stroke's direction; the arrow is offered as a style variant after recognition.
+        // A shaft with a head is not a StraightLineFit (the wings backtrack sideways), so it needs
+        // its own template. The template decides *that* it is an arrow; the committed shape is the
+        // mother Line, never the Arrow variant.
+        val arrowEnds = arrowEnds(points)
+        val tailX = arrowEnds[0]
+        val tailY = arrowEnds[1]
+        val tipX = arrowEnds[2]
+        val tipY = arrowEnds[3]
+        val arrowChord = hypot(tipX - tailX, tipY - tailY)
+        if (arrowChord >= ARROW_CHORD_FRACTION * diagonal) {
+            val template = trace(ShapeKind.Arrow, tailX, tailY, tipX, tipY).solid
+            val score = score(sampled, template, diagonal)
+            if (score <= MAX_MATCH_SCORE) {
+                matches += Match(
+                    ShapeCandidate(
+                        ShapeKind.Line, left, top, right, bottom,
+                        tailX, tailY, tipX, tipY, confidence(score),
+                    ),
+                    score,
+                )
+            }
+        }
         StraightLineFit.of(points)?.let { line ->
             val template = trace(ShapeKind.Line, line.startX, line.startY, line.endX, line.endY).solid
             val score = score(sampled, template, diagonal)
             if (score <= MAX_MATCH_SCORE) {
+                val (tailX, tailY, tipX, tipY) = directedEnds(points, line)
                 val l = minOf(left, line.startX, line.endX)
                 val t = minOf(top, line.startY, line.endY)
                 val r = maxOf(right, line.startX, line.endX)
@@ -120,29 +140,6 @@ object ShapeFit {
                 matches += Match(
                     ShapeCandidate(
                         ShapeKind.Line, l, t, r, b,
-                        line.startX, line.startY, line.endX, line.endY, confidence(score),
-                    ),
-                    score,
-                )
-            }
-        }
-
-        // Arrow: the tail is where the shaft was drawn from and the tip is the furthest point on
-        // it. Passing those through trace() rather than the bounding box is what keeps the head
-        // pointing the way the user dragged.
-        val ends = arrowEnds(points)
-        val tailX = ends[0]
-        val tailY = ends[1]
-        val tipX = ends[2]
-        val tipY = ends[3]
-        val chord = hypot(tipX - tailX, tipY - tailY)
-        if (chord >= ARROW_CHORD_FRACTION * diagonal) {
-            val template = trace(ShapeKind.Arrow, tailX, tailY, tipX, tipY).solid
-            val score = score(sampled, template, diagonal)
-            if (score <= MAX_MATCH_SCORE) {
-                matches += Match(
-                    ShapeCandidate(
-                        ShapeKind.Arrow, left, top, right, bottom,
                         tailX, tailY, tipX, tipY, confidence(score),
                     ),
                     score,
@@ -165,6 +162,10 @@ object ShapeFit {
                 firstX, firstY, lastX, lastY, matches)
             addDrawnTriangle(sampled, diagonal, left, top, right, bottom,
                 firstX, firstY, lastX, lastY, matches)
+            // A diamond or a rounded rectangle has the same four corners as an axis-aligned box.
+            // Reading them as the quadrilateral mother lets the style menu offer the exact variant.
+            addDrawnQuadrilateral(sampled, diagonal, left, top, right, bottom,
+                firstX, firstY, lastX, lastY, matches)
         }
 
         // Open flat shapes need two dimensions but deliberately do not close: the L and the curve.
@@ -173,30 +174,19 @@ object ShapeFit {
                 firstX, firstY, lastX, lastY, matches)
         }
 
-        // A solid is read from its visible wireframe. Its template may be several polylines; the
-        // scoring compares the ink against their union, so drawing the visible edges in one held
-        // stroke matches while a lone rectangle does not cover the extra edges.
-        if (twoDimensional) {
-            addTemplates(SOLID_KINDS, left, top, right, bottom, sampled, diagonal,
-                firstX, firstY, lastX, lastY, matches)
-        }
-
         val allowed = matches.filter { it.candidate.kind in enabledKinds }
         if (allowed.isEmpty()) return null
-        val ordered = allowed.sortedBy { it.score }
-        val best = ordered.first()
-        val runnerUp = ordered.getOrNull(1)
-        // A rounded rectangle and a rectangle fit the same ink almost equally well; refusing both
-        // because they tie helps nobody. Only refuse when a flat and a solid are genuinely tied:
-        // picking the wrong one there changes the number of edges on the page.
-        if (runnerUp != null && runnerUp.score - best.score < AMBIGUITY_MARGIN &&
-            isFlat(best.candidate.kind) != isFlat(runnerUp.candidate.kind)) return null
-        return best.candidate
+        val flat = allowed.minBy { it.score }
+        // A solid is never committed, even when its visible edges happen to look like a flat mother:
+        // if the stroke fits a solid at least as closely as its best flat reading, it stays ink.
+        val solidScore = ShapeKind.onPage(PAGE_SOLID).minOf { kind ->
+            score(sampled, trace(kind, left, top, right, bottom).solid, diagonal)
+        }
+        if (solidScore <= flat.score) return null
+        return flat.candidate
     }
 
     private data class Match(val candidate: ShapeCandidate, val score: Float)
-
-    private fun isFlat(kind: ShapeKind) = kind !in SOLID_KINDS
 
     private fun addTemplates(
         kinds: List<ShapeKind>,
@@ -216,9 +206,14 @@ object ShapeFit {
             // Some shapes can be drawn in more than one orientation. Score against every plausible
             // variant and keep the best, so an upside-down triangle or a right angle in the other
             // corner still reads as the shape the user drew.
-            val score = orientationVariants(kind, left, top, right, bottom)
-                .map { score(sampled, it, diagonal) }
-                .minOrNull() ?: return@forEach
+            val best = orientationVariants(kind, left, top, right, bottom)
+                .map { template -> template to score(sampled, template, diagonal) }
+                .minByOrNull { it.second } ?: return@forEach
+            val (template, score) = best
+            // A wireframe solid retraces edges inside its outline. Its ink is far longer than the
+            // closed figure it happens to resemble, so no solid can borrow a flat mother's template.
+            if (kind in CLOSED_KINDS &&
+                strokeLength(sampled) > MAX_POLYGON_STROKE_RATIO * polylineLength(template)) return@forEach
             if (score <= MAX_MATCH_SCORE) {
                 matches += Match(
                     ShapeCandidate(
@@ -252,10 +247,9 @@ object ShapeFit {
         )
         val score = score(sampled, listOf(outline), diagonal)
         if (score > MAX_MATCH_SCORE) return
-        val kind = if (hasRightAngle(corners)) ShapeKind.RightTriangle else ShapeKind.Triangle
         matches += Match(
             ShapeCandidate(
-                kind, left, top, right, bottom,
+                ShapeKind.Triangle, left, top, right, bottom,
                 firstX, firstY, lastX, lastY, confidence(score),
                 vertices = corners,
             ),
@@ -263,25 +257,72 @@ object ShapeFit {
         )
     }
 
+    /**
+     * Recognises a quadrilateral drawn from arbitrary vertices. A diamond and a rounded rectangle
+     * are both variants of the `Rectangle` family: their own four corners are the template, so the
+     * user can pick the exact variant from the style menu after recognition.
+     */
+    private fun addDrawnQuadrilateral(
+        sampled: FloatArray,
+        diagonal: Float,
+        left: Float, top: Float, right: Float, bottom: Float,
+        firstX: Float, firstY: Float, lastX: Float, lastY: Float,
+        matches: ArrayList<Match>,
+    ) {
+        val corners = polygonCorners(sampled, diagonal, 4) ?: return
+        val outline = FloatArray(corners.size * 2 + 2).also { path ->
+            corners.forEachIndexed { index, corner ->
+                path[index * 2] = corner.first
+                path[index * 2 + 1] = corner.second
+            }
+            path[path.size - 2] = corners.first().first
+            path[path.size - 1] = corners.first().second
+        }
+        val score = score(sampled, listOf(outline), diagonal)
+        if (score > MAX_MATCH_SCORE) return
+        matches += Match(
+            ShapeCandidate(
+                ShapeKind.Rectangle, left, top, right, bottom,
+                firstX, firstY, lastX, lastY, confidence(score),
+            ),
+            score,
+        )
+    }
+
     /** The three corners of a closed stroke, or null when it has more or fewer. */
-    private fun triangleCorners(points: FloatArray, diagonal: Float): List<Pair<Float, Float>>? {
+    private fun triangleCorners(points: FloatArray, diagonal: Float): List<Pair<Float, Float>>? =
+        polygonCorners(points, diagonal, 3)
+
+    /** The [expected] corners of a closed stroke, or null for any other polygon. */
+    private fun polygonCorners(
+        points: FloatArray,
+        diagonal: Float,
+        expected: Int,
+    ): List<Pair<Float, Float>>? {
         val pairs = (points.indices step 2).map { points[it] to points[it + 1] }
-        val simplified = simplify(pairs, TRIANGLE_CORNER_FRACTION * diagonal)
-        if (simplified.size < 4) return null
+        val simplified = simplify(pairs, CORNER_FRACTION * diagonal)
+        if (simplified.size < expected + 1) return null
         val gap = hypot(
             simplified.first().first - simplified.last().first,
             simplified.first().second - simplified.last().second,
         )
         if (gap > CLOSURE_FRACTION * diagonal) return null
         val corners = simplified.dropLast(1)
-        if (corners.size != 3) return null
+        if (corners.size != expected) return null
         var twiceArea = 0f
         for (index in corners.indices) {
             val a = corners[index]
             val b = corners[(index + 1) % corners.size]
             twiceArea += a.first * b.second - b.first * a.second
         }
-        if (abs(twiceArea) < MIN_TRIANGLE_AREA_FRACTION * diagonal * diagonal) return null
+        if (abs(twiceArea) < MIN_POLYGON_AREA_FRACTION * diagonal * diagonal) return null
+        var outlineLength = 0f
+        for (index in corners.indices) {
+            val a = corners[index]
+            val b = corners[(index + 1) % corners.size]
+            outlineLength += hypot(b.first - a.first, b.second - a.second)
+        }
+        if (strokeLength(points) > MAX_POLYGON_STROKE_RATIO * outlineLength) return null
         return corners
     }
 
@@ -311,23 +352,6 @@ object ShapeFit {
             simplify(points.drop(index), epsilon)
     }
 
-    /** True when one corner is a right angle, allowing for a hand-drawn few degrees of error. */
-    private fun hasRightAngle(corners: List<Pair<Float, Float>>): Boolean {
-        for (index in corners.indices) {
-            val corner = corners[index]
-            val next = corners[(index + 1) % corners.size]
-            val previous = corners[(index + 2) % corners.size]
-            val ux = next.first - corner.first
-            val uy = next.second - corner.second
-            val vx = previous.first - corner.first
-            val vy = previous.second - corner.second
-            val dot = ux * vx + uy * vy
-            val lengths = hypot(ux, uy) * hypot(vx, vy)
-            if (lengths > 0f && abs(dot) <= RIGHT_ANGLE_COSINE * lengths) return true
-        }
-        return false
-    }
-
     /** The template orientations a person might realistically draw for [kind]. */
     private fun orientationVariants(
         kind: ShapeKind,
@@ -344,13 +368,6 @@ object ShapeFit {
                 base.mirrorY(left, right, top, bottom),
                 base.rotated(left, right, top, bottom, quarterTurns = 1),
                 base.rotated(left, right, top, bottom, quarterTurns = 3),
-            )
-            // The right angle can sit in any of the four corners.
-            ShapeKind.RightTriangle -> listOf(
-                base,
-                base.mirrorX(left, right, top, bottom),
-                base.mirrorY(left, right, top, bottom),
-                base.mirrorX(left, right, top, bottom).mirrorY(left, right, top, bottom),
             )
             // The corner can sit in any of the four corners too.
             ShapeKind.L -> listOf(
@@ -417,10 +434,25 @@ object ShapeFit {
 
     private fun confidence(score: Float): Float = (1f - score / MAX_MATCH_SCORE).coerceIn(0f, 1f)
 
+    /** Total travel along a polyline, used to tell a plain outline from a retraced wireframe. */
+    private fun strokeLength(points: FloatArray): Float {
+        var length = 0f
+        for (index in 2 until points.size step 2) {
+            length += hypot(points[index] - points[index - 2], points[index + 1] - points[index - 1])
+        }
+        return length
+    }
+
+    private fun polylineLength(paths: List<FloatArray>): Float {
+        var total = 0f
+        paths.forEach { total += strokeLength(it) }
+        return total
+    }
+
     /**
-     * The tail is the start of the stroke; the tip is the furthest point from it. A shaft is drawn
-     * first and is longer than either head wing, so this recovers the direction without having to
-     * guess which end of the stroke the head sits on.
+     * The tail is the start of the stroke and the tip is the furthest point from it. A shaft is
+     * drawn first and is longer than either head wing, so this recovers the arrow's direction
+     * without guessing which end the head sits on.
      */
     private fun arrowEnds(points: FloatArray): FloatArray {
         val tailX = points[0]
@@ -437,6 +469,26 @@ object ShapeFit {
             }
         }
         return floatArrayOf(tailX, tailY, tipX, tipY)
+    }
+
+    /**
+     * Keeps the direction the stroke was drawn in, projected onto the snapped line. A line
+     * recognized from an arrow-shaped stroke therefore points the same way; choosing the arrow
+     * style later keeps that direction.
+     */
+    private fun directedEnds(points: FloatArray, line: StraightLine): FloatArray {
+        val dx = line.endX - line.startX
+        val dy = line.endY - line.startY
+        val lengthSq = dx * dx + dy * dy
+        if (lengthSq <= 0f) return floatArrayOf(line.startX, line.startY, line.endX, line.endY)
+        val lastX = points[points.size - 2]
+        val lastY = points[points.size - 1]
+        val along = (lastX - line.startX) * dx + (lastY - line.startY) * dy
+        return if (along >= lengthSq / 2f) {
+            floatArrayOf(line.startX, line.startY, line.endX, line.endY)
+        } else {
+            floatArrayOf(line.endX, line.endY, line.startX, line.startY)
+        }
     }
 
     /** Inserts points along each segment so no edge is represented by fewer than a few samples. */

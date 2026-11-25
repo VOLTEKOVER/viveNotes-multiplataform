@@ -234,6 +234,7 @@ internal fun WorkspacePage(
         onShapeLineType = { type -> onStateChange { it.setSelectedShapeLineType(type) } },
         onShapeWidth = { width -> onStateChange { it.setSelectedShapeBorderWidth(width) } },
         onShapeFill = { argb -> onStateChange { it.setSelectedShapeFill(argb) } },
+        onShapeKind = { kind -> onStateChange { it.setSelectedShapeKind(kind) } },
         onMoveShapeEnd = { id, atEnd, x, y, history ->
             onStateChange { it.moveShapeEnd(id, atEnd, x, y, history) }
         },

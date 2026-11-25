@@ -1,5 +1,6 @@
 package com.vivenotes.model.ink
 
+import com.vivenotes.model.Outline
 import kotlin.math.cos
 import kotlin.math.sin
 
@@ -272,3 +273,19 @@ private fun arc(id: String, x1: Float, y1: Float, x2: Float, y2: Float): ShapeSe
 private const val ELLIPSE_ARCS = 16
 
 private const val PI_F = 3.1415927f
+
+/**
+ * Replaces [this] shape's geometry with the variant [kind], keeping its identity, style and lock.
+ *
+ * Recognition produces one mother shape; the style menu lets the user pick the exact variant. The
+ * seeded geometry fills the current bounds, so a variant swap is an in-place replacement rather
+ * than a restyle of the same segments.
+ */
+fun Outline.Shape.reseedAs(kind: ShapeKind, nextId: () -> String): Outline.Shape {
+    if (this.kind == kind) return this
+    val seeded = seedSegments(kind, x, y, x + width, y + height, nextId = nextId)
+    val fill = fillArgb.takeUnless {
+        kind == ShapeKind.Line || kind == ShapeKind.Arrow || kind == ShapeKind.L || kind == ShapeKind.Curve
+    }
+    return copy(kind = kind, segments = seeded, fillArgb = fill).withRecomputedBounds()
+}

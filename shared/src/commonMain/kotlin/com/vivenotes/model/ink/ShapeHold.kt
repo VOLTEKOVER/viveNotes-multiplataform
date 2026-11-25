@@ -11,7 +11,7 @@ import kotlin.math.hypot
  */
 internal class ShapeHold(
     private val slop: Float,
-    private val enabledKinds: Set<ShapeKind> = ShapeKind.entries.toSet(),
+    private val enabledKinds: Set<ShapeKind> = ShapeKind.onPage(PAGE_BASIC).toSet(),
 ) {
     private val points = ArrayList<Float>()
     private var anchor: RulerPoint? = null

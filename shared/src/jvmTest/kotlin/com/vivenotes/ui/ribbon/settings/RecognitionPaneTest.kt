@@ -17,6 +17,7 @@ import com.vivenotes.ui.components.ToolPaneTags
 import com.vivenotes.ui.shell.WorkspaceScreen
 import com.vivenotes.ui.theme.ViveNotesTheme
 import com.vivenotes.workspace.RibbonTab
+import com.vivenotes.workspace.ShapeRecognitionGroup
 import com.vivenotes.workspace.ShapeRecognitionSettings
 import com.vivenotes.workspace.WorkspaceState
 import kotlin.test.Test
@@ -28,7 +29,7 @@ import kotlin.test.assertTrue
 class RecognitionPaneTest {
 
     @Test
-    fun recognitionDocksAPaneWithTheMainSwitchAndEveryShape() =
+    fun recognitionDocksAPaneWithTheMainSwitchAndEveryShapeGroup() =
         runDesktopComposeUiTest(width = 1600, height = 900) {
             var observed = WorkspaceState.demo().copy(activeTab = RibbonTab.Settings)
             var saved: ShapeRecognitionSettings? = null
@@ -43,8 +44,8 @@ class RecognitionPaneTest {
             onNodeWithTag(RecognitionTags.Open).performClick().assertIsSelected()
             onNodeWithTag(ToolPaneTags.Pane).assertExists()
             onNodeWithTag(RecognitionTags.Automatic).assertIsOn()
-            ShapeKind.entries.forEach { kind ->
-                onNodeWithTag(RecognitionTags.kind(kind)).performScrollTo().assertIsOn()
+            ShapeRecognitionGroup.entries.forEach { group ->
+                onNodeWithTag(RecognitionTags.group(group)).performScrollTo().assertIsOn()
             }
             onNodeWithTag(RecognitionTags.NoneSelected).assertDoesNotExist()
 
@@ -54,11 +55,16 @@ class RecognitionPaneTest {
                 assertEquals(false, saved?.automatic)
             }
 
-            onNodeWithTag(RecognitionTags.kind(ShapeKind.Rectangle)).performScrollTo().performClick().assertIsOff()
+            onNodeWithTag(RecognitionTags.group(ShapeRecognitionGroup.Quadrilaterals))
+                .performScrollTo().performClick().assertIsOff()
             runOnIdle {
-                assertFalse(observed.recognitionSettings.enabledKinds.contains(ShapeKind.Rectangle))
-                assertFalse(saved!!.enabledKinds.contains(ShapeKind.Rectangle))
-                assertTrue(saved!!.enabledKinds.contains(ShapeKind.Cube))
+                val enabled = saved!!.enabledKinds
+                assertTrue(ShapeRecognitionGroup.Quadrilaterals.kinds.none { it in enabled })
+                assertFalse(enabled.contains(ShapeKind.Rectangle))
+                assertFalse(enabled.contains(ShapeKind.RoundedRectangle))
+                assertFalse(enabled.contains(ShapeKind.Diamond))
+                assertTrue(enabled.contains(ShapeKind.Line))
+                assertTrue(enabled.contains(ShapeKind.Ellipse))
             }
 
             onNodeWithTag(RecognitionTags.Open).performClick()
@@ -66,10 +72,9 @@ class RecognitionPaneTest {
         }
 
     @Test
-    fun uncheckingEveryKindShowsWhyHeldInkStaysInk() =
+    fun uncheckingEveryGroupShowsWhyHeldInkStaysInk() =
         runDesktopComposeUiTest(width = 1600, height = 900) {
-            var observed = WorkspaceState.demo().copy(activeTab = RibbonTab.Settings,
-                recognitionSettings = ShapeRecognitionSettings(enabledKinds = setOf(ShapeKind.Line)))
+            var observed = WorkspaceState.demo().copy(activeTab = RibbonTab.Settings)
             var saved: ShapeRecognitionSettings? = null
             setContent {
                 var state by remember { mutableStateOf(observed) }
@@ -80,11 +85,34 @@ class RecognitionPaneTest {
             }
 
             onNodeWithTag(RecognitionTags.Open).performClick()
-            onNodeWithTag(RecognitionTags.kind(ShapeKind.Line)).performClick().assertIsOff()
+            ShapeRecognitionGroup.entries.forEach { group ->
+                onNodeWithTag(RecognitionTags.group(group)).performScrollTo().performClick().assertIsOff()
+            }
             onNodeWithTag(RecognitionTags.NoneSelected).assertExists()
             runOnIdle {
                 assertTrue(observed.recognitionSettings.enabledKinds.isEmpty())
                 assertTrue(saved!!.enabledKinds.isEmpty())
+            }
+        }
+
+    @Test
+    fun aPartlyEnabledGroupShowsAsOffUntilItsLastKindIsOn() =
+        runDesktopComposeUiTest(width = 1600, height = 900) {
+            var observed = WorkspaceState.demo().copy(activeTab = RibbonTab.Settings,
+                recognitionSettings = ShapeRecognitionSettings(enabledKinds = setOf(ShapeKind.Line)))
+            setContent {
+                var state by remember { mutableStateOf(observed) }
+                ViveNotesTheme(darkTheme = true) {
+                    WorkspaceScreen(state = state, onStateChange = { state = it(state); observed = state })
+                }
+            }
+
+            onNodeWithTag(RecognitionTags.Open).performClick()
+            val paths = onNodeWithTag(RecognitionTags.group(ShapeRecognitionGroup.Paths)).performScrollTo()
+            paths.assertIsOff()
+            paths.performClick().assertIsOn()
+            runOnIdle {
+                assertTrue(ShapeRecognitionGroup.Paths.kinds.all { it in observed.recognitionSettings.enabledKinds })
             }
         }
 }

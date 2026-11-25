@@ -15,6 +15,7 @@ import com.vivenotes.workspace.RibbonTab
 import com.vivenotes.workspace.WorkspaceState
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -46,6 +47,27 @@ class CanvasInteractionStateTest {
             assertEquals(editedTitle, interaction.titleValue)
             assertTrue(interaction.panActive)
             assertEquals(4, interaction.reachedX)
+        }
+    }
+
+    @Test
+    fun thePostRecognitionStyleMenuStateSurvivesEditsAndResetsWithThePage() = runDesktopComposeUiTest {
+        val workspace = mutableStateOf(WorkspaceState.demo())
+        lateinit var interaction: CanvasInteractionState
+        setContent { interaction = rememberCanvasInteractionState(workspace.value.selectedPage, workspace.value, 1f) }
+        runOnIdle {
+            interaction.awaitingRecognitionStyle = true
+            interaction.recognitionStyleShapeId = "new-shape"
+            workspace.value = workspace.value.copy(activeTab = RibbonTab.Draw)
+        }
+        runOnIdle {
+            assertTrue(interaction.awaitingRecognitionStyle)
+            assertEquals("new-shape", interaction.recognitionStyleShapeId)
+            workspace.value = workspace.value.selectPage("lecture-notes")
+        }
+        runOnIdle {
+            assertFalse(interaction.awaitingRecognitionStyle)
+            assertNull(interaction.recognitionStyleShapeId)
         }
     }
 

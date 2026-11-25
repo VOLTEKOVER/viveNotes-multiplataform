@@ -1,7 +1,6 @@
 package com.vivenotes.ui.ribbon.settings
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -19,11 +18,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.vivenotes.localization.Strings
-import com.vivenotes.model.ink.PAGE_BASIC
-import com.vivenotes.model.ink.PAGE_SOLID
-import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.ui.components.PaneGroup
 import com.vivenotes.ui.components.ToolPane
+import com.vivenotes.workspace.ShapeRecognitionGroup
 import com.vivenotes.workspace.ShapeRecognitionSettings
 
 /** Semantics identifiers for Settings → Shape recognition. */
@@ -32,13 +29,13 @@ object RecognitionTags {
     const val Automatic = "shape-recognition-automatic"
     const val NoneSelected = "shape-recognition-none-selected"
 
-    fun kind(kind: ShapeKind): String = "shape-recognition-kind-${kind.name.lowercase()}"
+    fun group(group: ShapeRecognitionGroup): String = "shape-recognition-group-${group.name.lowercase()}"
 }
 
 /**
  * Settings → Shape recognition. The main switch decides whether the hold gesture looks for a shape
- * at all; the checkboxes below decide which kinds it may produce. Both changes reach the host at
- * once and are mirrored into the workspace, so the next stroke uses them without a restart.
+ * at all; the group checkboxes below decide which kinds it may produce. Both changes reach the host
+ * at once and are mirrored into the workspace, so the next stroke uses them without a restart.
  */
 @Composable
 internal fun RecognitionPane(
@@ -59,45 +56,25 @@ internal fun RecognitionPane(
                 Switch(checked = checked, onCheckedChange = null)
             }
         }
-        KindGroup(
-            title = Strings.basic_shapes,
-            kinds = ShapeKind.onPage(PAGE_BASIC),
-            settings = settings,
-            onSettingsChange = onSettingsChange,
-        )
-        KindGroup(
-            title = Strings.solid_shapes,
-            kinds = ShapeKind.onPage(PAGE_SOLID),
-            settings = settings,
-            onSettingsChange = onSettingsChange,
-        )
+        PaneGroup(Strings.shapes_to_recognize) {
+            ShapeRecognitionGroup.entries.forEachIndexed { index, group ->
+                if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                ToggleRow(
+                    label = group.label,
+                    hint = Strings.recognition_group_partial.takeIf { group.partlyEnabledIn(settings) },
+                    checked = group.enabledIn(settings),
+                    role = Role.Checkbox,
+                    tag = RecognitionTags.group(group),
+                    onCheckedChange = { onSettingsChange(group.setEnabled(settings, it)) },
+                ) { checked ->
+                    Checkbox(checked = checked, onCheckedChange = null)
+                }
+            }
+        }
         if (settings.enabledKinds.isEmpty()) {
             Text(Strings.no_shapes_selected, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(start = 4.dp, top = 12.dp).testTag(RecognitionTags.NoneSelected))
-        }
-    }
-}
-
-@Composable
-private fun ColumnScope.KindGroup(
-    title: String,
-    kinds: List<ShapeKind>,
-    settings: ShapeRecognitionSettings,
-    onSettingsChange: (ShapeRecognitionSettings) -> Unit,
-) {
-    PaneGroup(title) {
-        kinds.forEachIndexed { index, kind ->
-            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            ToggleRow(
-                label = kind.label,
-                checked = kind in settings.enabledKinds,
-                role = Role.Checkbox,
-                tag = RecognitionTags.kind(kind),
-                onCheckedChange = { onSettingsChange(settings.withKind(kind, it)) },
-            ) { checked ->
-                Checkbox(checked = checked, onCheckedChange = null)
-            }
         }
     }
 }

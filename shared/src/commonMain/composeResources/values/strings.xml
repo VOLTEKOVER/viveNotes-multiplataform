@@ -283,6 +283,14 @@
     <string name="shapes_to_recognize">Shapes to recognize</string>
     <string name="basic_shapes">Basic shapes</string>
     <string name="solid_shapes">Solid shapes</string>
+    <string name="recognition_paths">Paths</string>
+    <string name="recognition_quadrilaterals">Quadrilaterals</string>
+    <string name="recognition_conics">Conics</string>
+    <string name="recognition_polygons">Polygons</string>
+    <string name="recognition_group_partial">Some shapes in this group are on</string>
+    <string name="change_shape_style">Change shape style</string>
+    <string name="choose_shape_style">Choose a style</string>
+    <string name="shape_style_hint">Pick the style you meant: the recognized shape is replaced in place.</string>
     <string name="no_shapes_selected">No shapes selected: held ink stays as ink.</string>
     <string name="thickness">Thickness</string>
     <string name="pressure">Pressure</string>

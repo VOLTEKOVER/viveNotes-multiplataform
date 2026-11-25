@@ -38,6 +38,8 @@ internal class CanvasInteractionState(
     val inkDragOffsetState: MutableState<Offset>,
     val inkMoveBusyState: MutableState<Boolean>,
     val inkToolkitBoundsInViewState: MutableState<Rect?>,
+    /** The shape id whose post-recognition style menu is open, or null. */
+    val recognitionStyleShapeIdState: MutableState<String?>,
     val spaceDraftState: MutableState<SpaceCut?>,
     val shapeDraftState: MutableState<Pair<Offset, Offset>?>,
     val panActiveState: MutableState<Boolean>,
@@ -52,6 +54,8 @@ internal class CanvasInteractionState(
     val reachedYState: MutableIntState,
     val curveVertexEditState: MutableState<CurveVertexEdit?>,
     val curveVertexPreviewState: MutableState<Outline.Shape?>,
+    /** Set when a hold just recognized a shape, until the new shape can be selected for its menu. */
+    val awaitingRecognitionStyleState: MutableState<Boolean>,
 ) {
     var searchInkBounds by searchInkBoundsState
     var viewportPx by viewportPxState
@@ -64,6 +68,8 @@ internal class CanvasInteractionState(
     var inkDragOffset by inkDragOffsetState
     var inkMoveBusy by inkMoveBusyState
     var inkToolkitBoundsInView by inkToolkitBoundsInViewState
+    var recognitionStyleShapeId by recognitionStyleShapeIdState
+    var awaitingRecognitionStyle by awaitingRecognitionStyleState
     var spaceDraft by spaceDraftState
     var shapeDraft by shapeDraftState
     var panActive by panActiveState
@@ -94,6 +100,8 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
     val inkDragOffsetState = remember(page?.id, state.selectedInk, zoom) { mutableStateOf(Offset.Zero) }
     val inkMoveBusyState = remember(page?.id) { mutableStateOf(false) }
     val inkToolkitBoundsInViewState = remember(page?.id) { mutableStateOf<Rect?>(null) }
+    val recognitionStyleShapeIdState = remember(page?.id) { mutableStateOf<String?>(null) }
+    val awaitingRecognitionStyleState = remember(page?.id) { mutableStateOf(false) }
     val spaceDraftState = remember(page?.id, state.drawPlacement, zoom) { mutableStateOf<SpaceCut?>(null) }
     val shapeDraftState = remember(page?.id) { mutableStateOf<Pair<Offset, Offset>?>(null) }
     val panActiveState = remember(page?.id) { mutableStateOf(false) }
@@ -125,6 +133,7 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
         inkDragOffsetState,
         inkMoveBusyState,
         inkToolkitBoundsInViewState,
+        recognitionStyleShapeIdState,
         spaceDraftState,
         shapeDraftState,
         panActiveState,
@@ -139,5 +148,6 @@ internal fun rememberCanvasInteractionState(page: PageSummary?, state: Workspace
         reachedYState,
         curveVertexEditState,
         curveVertexPreviewState,
+        awaitingRecognitionStyleState,
     )
 }

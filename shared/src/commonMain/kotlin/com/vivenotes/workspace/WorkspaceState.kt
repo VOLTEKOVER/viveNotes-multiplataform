@@ -29,6 +29,7 @@ import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.model.ink.ShapeFit
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.seedSegments
+import com.vivenotes.model.ink.reseedAs
 import com.vivenotes.model.ink.DEFAULT_SOLID_WALL_THICKNESS
 import com.vivenotes.model.ink.MIN_SOLID_WALL_THICKNESS
 import com.vivenotes.model.ink.MAX_SOLID_WALL_THICKNESS
@@ -636,6 +637,18 @@ data class WorkspaceState(
             focusedTextOutlineId = null,
             wordSelections = null,
         )
+    }
+
+    /**
+     * Replaces selected shapes with another variant of the same recognition family, keeping their
+     * place, style and lock. A variant change is a geometry replacement, not an in-place restyle.
+     */
+    fun setSelectedShapeKind(kind: ShapeKind): WorkspaceState = editOutlines { outlines ->
+        outlines.map { outline ->
+            if (outline.id !in selectedObjectIds || outline !is Outline.Shape ||
+                ShapeRecognitionGroup.groupOf(outline.kind) != ShapeRecognitionGroup.groupOf(kind)) outline
+            else outline.reseedAs(kind, nextId = ::newId)
+        }
     }
 
     /**

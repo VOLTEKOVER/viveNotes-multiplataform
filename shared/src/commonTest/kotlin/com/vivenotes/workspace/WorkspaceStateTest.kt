@@ -10,7 +10,10 @@ import com.vivenotes.model.PaperSize
 import com.vivenotes.model.Run
 import com.vivenotes.model.Mark
 import com.vivenotes.model.Outline
+import com.vivenotes.model.ink.PAGE_BASIC
+import com.vivenotes.model.ink.PAGE_SOLID
 import com.vivenotes.model.ink.ShapeSegment
+import com.vivenotes.model.ink.seedSegments
 import com.vivenotes.model.ink.ShapeCandidate
 import com.vivenotes.model.ink.ShapeKind
 import com.vivenotes.model.ink.LineType
@@ -161,6 +164,42 @@ class WorkspaceStateTest {
     }
 
     @Test
+    fun changingAShapeStyleReseedsTheSelectedVariantInPlace() {
+        val first = shapeOutline("first", 100f, fillArgb = 0xFF112233.toInt())
+        val second = shapeOutline("second", 300f)
+        val base = WorkspaceState.demo().updatePage(WorkspaceState.demo().selectedPageId) {
+            it.copy(document = PageDoc(outlines = listOf(first, second)))
+        }.copy(selectedObjectIds = setOf("first"))
+
+        val changed = base.setSelectedShapeKind(ShapeKind.RoundedRectangle)
+        val outlines = changed.selectedPage!!.document.outlines.filterIsInstance<Outline.Shape>()
+
+        assertEquals(2, outlines.size)
+        assertEquals("first", outlines[0].id, "the shape is replaced, not duplicated")
+        assertEquals(ShapeKind.RoundedRectangle, outlines[0].kind)
+        assertEquals(first.x, outlines[0].x, 0.01f)
+        assertEquals(first.y, outlines[0].y, 0.01f)
+        assertEquals(first.width, outlines[0].width, 0.01f)
+        assertEquals(first.height, outlines[0].height, 0.01f)
+        assertEquals(first.borderArgb, outlines[0].borderArgb)
+        assertEquals(first.lineType, outlines[0].lineType)
+        assertEquals(first.fillArgb, outlines[0].fillArgb)
+        assertEquals(ShapeKind.Rectangle, outlines[1].kind, "an unselected shape keeps its variant")
+        assertEquals(base.structuralUndo.size + 1, changed.structuralUndo.size)
+        assertEquals(first, changed.undoStructure().selectedPage!!.document.outlines[0])
+    }
+
+    @Test
+    fun changingAShapeStyleCannotCrossRecognitionFamilies() {
+        val shape = shapeOutline("shape", 100f)
+        val base = WorkspaceState.demo().updatePage(WorkspaceState.demo().selectedPageId) {
+            it.copy(document = PageDoc(outlines = listOf(shape)))
+        }.copy(selectedObjectIds = setOf("shape"))
+
+        assertSame(base, base.setSelectedShapeKind(ShapeKind.Ellipse))
+    }
+
+    @Test
     fun recognizedShapeAboveTheTitleFloorIsRefused() {
         val initial = WorkspaceState.demo().selectInkTool(InkTool.Pen)
         val floor = initial.selectedPage!!.document.style.titleFloor
@@ -177,7 +216,8 @@ class WorkspaceStateTest {
     @Test
     fun recognizedPreferencesKeepTheMainSwitchAndTheSelectedKinds() {
         val initial = WorkspaceState.demo()
-        assertEquals(ShapeKind.entries.toSet(), initial.recognitionSettings.enabledKinds)
+        assertEquals(ShapeKind.onPage(PAGE_BASIC).toSet(), initial.recognitionSettings.enabledKinds)
+        assertTrue(ShapeKind.onPage(PAGE_SOLID).none { it in initial.recognitionSettings.enabledKinds })
         assertTrue(initial.recognitionSettings.automatic)
 
         val chosen = ShapeRecognitionSettings(automatic = false,
@@ -859,6 +899,21 @@ class WorkspaceStateTest {
         }.copy(selectedInk = selection).setRecognitionSettings(
             ShapeRecognitionSettings(automatic = false, enabledKinds = enabledKinds))
         return Triple(ready, selection, ink)
+    }
+
+    private fun shapeOutline(
+        id: String,
+        x: Float,
+        kind: ShapeKind = ShapeKind.Rectangle,
+        fillArgb: Int? = null,
+    ): Outline.Shape {
+        var segment = 0
+        return Outline.Shape(
+            id = id, kind = kind,
+            segments = seedSegments(kind, x, 200f, x + 120f, 280f) { "seg-${id}-${segment++}" },
+            borderArgb = 0xFF334455.toInt(), borderWidth = 3f,
+            lineType = LineType.Dashed, fillArgb = fillArgb,
+        ).withRecomputedBounds()
     }
 
     private fun rectanglePoints(left: Float, top: Float, right: Float, bottom: Float): FloatArray {

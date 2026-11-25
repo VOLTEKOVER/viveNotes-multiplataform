@@ -70,18 +70,18 @@ class ShapeFitTest {
     }
 
     @Test
-    fun `an arrow keeps the direction it was drawn in`() {
+    fun `a drawn arrow is a line with the direction it was drawn in`() {
         val rightwards = ShapeFit.classify(arrow(100f, 200f, 400f, 200f))
         val leftwards = ShapeFit.classify(arrow(400f, 200f, 100f, 200f))
 
         assertNotNull(rightwards)
-        assertEquals(ShapeKind.Arrow, rightwards!!.kind)
+        assertEquals(ShapeKind.Line, rightwards!!.kind)
         assertEquals(100f, rightwards.startX, 1f)
         assertEquals(400f, rightwards.endX, 1f)
         assertTrue("the rightward arrow should point right", rightwards.endX > rightwards.startX)
 
         assertNotNull(leftwards)
-        assertEquals(ShapeKind.Arrow, leftwards!!.kind)
+        assertEquals(ShapeKind.Line, leftwards!!.kind)
         assertEquals(400f, leftwards.startX, 1f)
         assertEquals(100f, leftwards.endX, 1f)
         assertTrue("the leftward arrow should point left", leftwards.endX < leftwards.startX)
@@ -103,16 +103,17 @@ class ShapeFitTest {
         assertNotNull("a wobbly triangle was refused", triangle)
         assertEquals(ShapeKind.Triangle, triangle!!.kind)
         assertNotNull("a wobbly arrow was refused", arrow)
-        assertEquals(ShapeKind.Arrow, arrow!!.kind)
+        assertEquals(ShapeKind.Line, arrow!!.kind)
     }
 
     @Test
-    fun `every remaining shape kind is recognised from its own traced geometry`() {
+    fun `every mother shape is recognised from its own traced geometry`() {
         val left = 100f
         val top = 120f
         val right = 320f
         val bottom = 280f
-        ShapeKind.entries.filter { it != ShapeKind.Line && it != ShapeKind.Arrow }.forEach { kind ->
+        listOf(ShapeKind.Rectangle, ShapeKind.Ellipse, ShapeKind.Triangle,
+            ShapeKind.Pentagon, ShapeKind.Hexagon, ShapeKind.L, ShapeKind.Curve).forEach { kind ->
             val fitted = ShapeFit.classify(traced(kind, left, top, right, bottom))
             assertNotNull("$kind was refused", fitted)
             assertEquals("$kind was misread as ${fitted!!.kind}", kind, fitted.kind)
@@ -121,17 +122,27 @@ class ShapeFitTest {
     }
 
     @Test
-    fun `new flat shapes and a solid tolerate the same hand wobble`() {
+    fun `variants read as their mother shape and solids are never recognised`() {
         val diamond = ShapeFit.classify(jitter(traced(ShapeKind.Diamond, 100f, 120f, 320f, 280f), 2f, 505))
         val hexagon = ShapeFit.classify(jitter(traced(ShapeKind.Hexagon, 100f, 120f, 320f, 280f), 2f, 606))
         val cube = ShapeFit.classify(jitter(traced(ShapeKind.Cube, 100f, 120f, 320f, 280f), 2f, 707))
 
         assertNotNull("a wobbly diamond was refused", diamond)
-        assertEquals(ShapeKind.Diamond, diamond!!.kind)
+        assertEquals("a diamond is a quadrilateral variant", ShapeKind.Rectangle, diamond!!.kind)
         assertNotNull("a wobbly hexagon was refused", hexagon)
         assertEquals(ShapeKind.Hexagon, hexagon!!.kind)
-        assertNotNull("a wobbly cube was refused", cube)
-        assertEquals(ShapeKind.Cube, cube!!.kind)
+        assertNull("a solid must not be recognized", cube)
+    }
+
+    @Test
+    fun `rounded corners and right angles read as their mother shape`() {
+        val rounded = ShapeFit.classify(traced(ShapeKind.RoundedRectangle, 100f, 120f, 320f, 280f))
+        val right = ShapeFit.classify(traced(ShapeKind.RightTriangle, 100f, 120f, 320f, 280f))
+
+        assertNotNull("a rounded rectangle was refused", rounded)
+        assertEquals(ShapeKind.Rectangle, rounded!!.kind)
+        assertNotNull("a right triangle was refused", right)
+        assertEquals(ShapeKind.Triangle, right!!.kind)
     }
 
     @Test

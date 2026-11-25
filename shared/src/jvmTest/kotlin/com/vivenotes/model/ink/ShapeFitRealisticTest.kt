@@ -18,9 +18,10 @@ import org.junit.Test
 class ShapeFitRealisticTest {
 
     @Test
-    fun everyKindSurvivesARealisticStroke() {
+    fun everyMotherShapeSurvivesARealisticStroke() {
         listOf(0L, 7L, 19L).forEach { seed ->
-            ShapeKind.entries.forEach { kind ->
+            listOf(ShapeKind.Line, ShapeKind.Curve, ShapeKind.L, ShapeKind.Rectangle,
+                ShapeKind.Ellipse, ShapeKind.Triangle, ShapeKind.Pentagon, ShapeKind.Hexagon).forEach { kind ->
                 val points = realistic(kind, 100f, 120f, 320f, 280f, 3f, seed)
                 val got = ShapeFit.classify(points)
                 assertNotNull("$kind (seed $seed) was refused on a realistic stroke", got)
@@ -30,11 +31,31 @@ class ShapeFitRealisticTest {
     }
 
     @Test
+    fun variantsReadAsTheirMotherAndSolidsAreNotRecognized() {
+        listOf(0L, 7L, 19L).forEach { seed ->
+            val expectations = mapOf(
+                ShapeKind.Arrow to ShapeKind.Line,
+                ShapeKind.RoundedRectangle to ShapeKind.Rectangle,
+                ShapeKind.Diamond to ShapeKind.Rectangle,
+                ShapeKind.RightTriangle to ShapeKind.Triangle,
+            )
+            expectations.forEach { (variant, mother) ->
+                val got = ShapeFit.classify(realistic(variant, 100f, 120f, 320f, 280f, 3f, seed))
+                assertNotNull("$variant (seed $seed) was refused on a realistic stroke", got)
+                assertEquals("$variant (seed $seed) was misread as ${got!!.kind}", mother, got.kind)
+            }
+            ShapeKind.onPage(com.vivenotes.model.ink.PAGE_SOLID).forEach { solid ->
+                val got = ShapeFit.classify(realistic(solid, 100f, 120f, 320f, 280f, 3f, seed))
+                org.junit.Assert.assertNull("$solid (seed $seed) was recognized", got)
+            }
+        }
+    }
+
+    @Test
     fun commonShapesSurviveStrongerWobble() {
         // A rectangle drawn with rounded corners and heavy wobble is honestly closer to a rounded
         // rectangle, so that pair is covered by the lower-wobble test above.
-        listOf(ShapeKind.Line, ShapeKind.Ellipse,
-            ShapeKind.Triangle, ShapeKind.RightTriangle, ShapeKind.Pentagon).forEach { kind ->
+        listOf(ShapeKind.Line, ShapeKind.Ellipse, ShapeKind.Triangle, ShapeKind.Pentagon).forEach { kind ->
             listOf(0L, 11L, 23L).forEach { seed ->
                 val points = realistic(kind, 100f, 120f, 320f, 280f, 4f, seed)
                 val got = ShapeFit.classify(points)
@@ -64,7 +85,7 @@ class ShapeFitRealisticTest {
                     ps.forEachIndexed { i, p -> out[i * 2] = p.first; out[i * 2 + 1] = p.second }
                 } }
             val got = ShapeFit.classify(pts)
-            val expected = if (index < 2) ShapeKind.Triangle else ShapeKind.RightTriangle
+            val expected = ShapeKind.Triangle
             assertNotNull("triangle orientation $index was refused", got)
             assertEquals("orientation $index misread as ${got!!.kind}", expected, got.kind)
         }
@@ -85,7 +106,7 @@ class ShapeFitRealisticTest {
         cases.forEach { (name, corners) ->
             val pts = densify(corners, 8f).toFloatArray()
             val got = ShapeFit.classify(pts)
-            val expected = if (name == "scalene") ShapeKind.Triangle else ShapeKind.RightTriangle
+            val expected = ShapeKind.Triangle
             assertNotNull("$name was refused", got)
             assertEquals("$name misread as ${got!!.kind}", expected, got.kind)
             assertEquals("$name did not report its drawn corners", 3, got.vertices?.size)
