@@ -50,7 +50,8 @@ enum class RibbonTab {
     Draw,
     Document,
     View,
-    Settings;
+    Settings,
+    MdTypist;
 
     val label: String get() = when (this) {
         File -> Strings.file_tab
@@ -58,6 +59,7 @@ enum class RibbonTab {
         Document -> Strings.document_tab
         View -> Strings.view_tab
         Settings -> Strings.settings_tab
+        MdTypist -> Strings.md_typist_tab
     }
 }
 

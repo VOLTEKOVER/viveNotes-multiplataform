@@ -132,15 +132,7 @@ class PageRenderer : AutoCloseable {
             val shift = shiftOf(graph.id)
             val bounds = InkBounds(graph.x, graph.y, graph.x + graph.width, graph.y + graph.height)
             if (!bounds.translated(shift.dx, shift.dy).overlaps(visible)) return@forEach
-            val function = graph.function() ?: return@forEach
-            val original = graph.takeIf { it.showOriginal && it.isMutated }?.originalFunction()
-            val window = graph.window()
-            graphPainter.draw(canvas,
-                GraphFrame(graph, graph.x + shift.dx, graph.y + shift.dy, graph.width, graph.height, 1f, window),
-                GraphColors(page.colors.backgroundArgb, page.colors.textArgb,
-                    graph.colorArgb ?: GraphPainter.DEFAULT_CURVE_ARGB, page.colors.accentArgb),
-                function::evaluate, original?.let { it::evaluate },
-                GraphAnalysis.pointsOfInterest(function::evaluate, window), page.equations[graph.id])
+            drawGraph(canvas, graph, page.colors, page.equations[graph.id], shift)
         }
 
         content.pictures.forEach { picture ->
@@ -238,7 +230,7 @@ class PageRenderer : AutoCloseable {
     // --- shapes ------------------------------------------------------------------------------
 
     /** `ShapeLayer.drawShape`, on an `android.graphics.Canvas`. */
-    private fun drawShape(canvas: Canvas, shape: Outline.Shape, canvasInkArgb: Int, shift: PdfShift) {
+    internal fun drawShape(canvas: Canvas, shape: Outline.Shape, canvasInkArgb: Int, shift: PdfShift) {
         val checkpoint = canvas.save()
         canvas.translate(shift.dx, shift.dy)
 
@@ -262,6 +254,32 @@ class PageRenderer : AutoCloseable {
         }
         line.pathEffect = null
         canvas.restoreToCount(checkpoint)
+    }
+
+    /**
+     * The same graph the page and the PDF draw, exposed so other exporters can rasterize a single
+     * graph without inventing a second, subtly different painter.
+     */
+    internal fun drawGraph(
+        canvas: Canvas,
+        graph: Outline.Graph,
+        colors: PdfCanvasColors,
+        equation: PdfEquation? = null,
+        shift: PdfShift = PdfShift.NONE,
+    ) {
+        val function = graph.function() ?: return
+        val original = graph.takeIf { it.showOriginal && it.isMutated }?.originalFunction()
+        val window = graph.window()
+        graphPainter.draw(
+            canvas,
+            GraphFrame(graph, graph.x + shift.dx, graph.y + shift.dy, graph.width, graph.height, 1f, window),
+            GraphColors(colors.backgroundArgb, colors.textArgb,
+                graph.colorArgb ?: GraphPainter.DEFAULT_CURVE_ARGB, colors.accentArgb),
+            function::evaluate,
+            original?.let { it::evaluate },
+            GraphAnalysis.pointsOfInterest(function::evaluate, window),
+            equation,
+        )
     }
 
     // --- equations ---------------------------------------------------------------------------

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.vivenotes.ai.AiModels
+import com.vivenotes.ai.LocalAiSettings
 import com.vivenotes.data.PictureLibrary
 import com.vivenotes.data.VideoThumbnailSource
 import com.vivenotes.diagnostics.DebugLog
@@ -76,6 +77,11 @@ import com.vivenotes.ui.ribbon.document.DocumentColorSelection
 import com.vivenotes.ui.ribbon.document.LinkEditorRequest
 import com.vivenotes.ui.ribbon.document.PictureDialog
 import com.vivenotes.ui.ribbon.draw.*
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistApiModelDialog
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistConverter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistDraft
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistExporter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistPage
 import com.vivenotes.ui.ribbon.view.viewActions
 import com.vivenotes.workspace.EditorDefaults
 import com.vivenotes.workspace.setGraphSliders
@@ -132,6 +138,11 @@ internal fun WorkspaceContent(
     onExportPdf: () -> Unit,
     aiModels: AiModels?,
     drawMath: DrawMath?,
+    /** Reads the page's handwriting and asks a local model server to write Markdown or Typst. */
+    mdTypistConverter: MdTypistConverter? = null,
+    mdTypistExporter: MdTypistExporter? = null,
+    mdTypistAiSettings: LocalAiSettings = LocalAiSettings(),
+    onMdTypistAiSettingsChange: (LocalAiSettings) -> Unit = {},
     typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     developmentBuild: Boolean,
     debugLog: DebugLog,
@@ -145,6 +156,7 @@ internal fun WorkspaceContent(
     val keyboardPaste = remember { CanvasKeyboardPaste() }
     val canvasControl = remember { CanvasViewControl() }
     val placement = remember { CanvasPlacement() }
+    val mdTypistDraft = remember { MdTypistDraft(mdTypistAiSettings, onMdTypistAiSettingsChange) }
     val importRequests = remember { com.vivenotes.ui.ribbon.file.ImportFileRequests() }
     val importScope = rememberCoroutineScope()
     var openPane by remember { mutableStateOf<DockedPane?>(null) }
@@ -330,6 +342,68 @@ internal fun WorkspaceContent(
     LaunchedEffect(state.navigationVisible, state.pageListVisible) {
         debugLog.event("navigation") { "visibility notebooks=${state.navigationVisible} pages=${state.pageListVisible}" }
     }
+    // One real page canvas, shared by the normal workspace and by MD-Typist's full-page preview:
+    // text boxes, equations, pictures, shapes and ink are drawn by the same composable.
+    val pageCanvas: @Composable (Modifier) -> Unit = { canvasModifier ->
+        CompositionLocalProvider(LocalDensity provides pageDensity) {
+            WorkspacePage(
+                debugLog = debugLog,
+                state = state,
+                onStateChange = onStateChange,
+                searchHit = searchHit,
+                searchRevealTick = searchRevealTick,
+                searchQuery = pageSearchQuery,
+                searchImageHighlight = searchImageHighlight,
+                pictureHighlights = { pictureHighlights.value },
+                pictures = pictures,
+                thumbnails = thumbnails.takeIf { view.linkPreviews },
+                canvasOrigin = canvasOrigin,
+                keyboardPaste = keyboardPaste,
+                canvasControl = canvasControl,
+                placement = placement,
+                view = view,
+                input = input,
+                canvasDark = canvasDark,
+                showMargins = openPane == DockedPane.PaperSize,
+                onZoomChange = { zoom -> currentOnViewChange(currentView.copy(zoom = zoom).normalized()) },
+                onTextShortcut = { event ->
+                    shortcutKeys.dispatch(event, currentBindings, ShortcutScope.TextBox, shortcuts::run) ||
+                        event.isTextFieldUndo()
+                },
+                editorFocusRequester = editorFocusRequester,
+                canvasFocusRequester = canvasFocusRequester,
+                modifier = canvasModifier,
+                requestEditorFocus = { editorFocusRequest++ },
+                drawMath = drawMath,
+                formulaReady = formulaReady,
+                onInkMath = { selection -> if (formulaReady && state.inkAndLinesSelection && state.selectedInk === selection) {
+                    inkMath = InkMathRequest(selection, state.selectedFormulaLines); openPane = DockedPane.Math } },
+                onShapeRecognized = { candidate, pen ->
+                    onStateChange { it.createRecognizedShape(candidate, pen) }
+                    debugLog.event("ink") { "recognised shape" }
+                },
+                onForceShapeRecognition = { selection ->
+                    onStateChange { it.forceShapeRecognition(selection) }
+                    debugLog.event("ink") { "forced shape recognition" }
+                },
+                applyEditorCommand = ::applyEditorCommand,
+                onLinkRequest = { linkEditor = it },
+                onEditGraphSliders = { graphSliders = it },
+                // The formula in the pane as if read off ink; a graph placed from there
+                // lands below the equation. The pane holds a copy — editing it there
+                // leaves the equation on the page as it was.
+                onOpenEquationInMath = { equation ->
+                    inkMath = null
+                    mathSource = equation.latex
+                    mathAnchor = androidx.compose.ui.geometry.Rect(equation.x, equation.y,
+                        equation.x + equation.width, equation.y + equation.height)
+                    openPane = DockedPane.Math
+                    debugLog.event("math") { "equation opened in pane" }
+                },
+                onOpenTypstImage = typstEditImage?.let { image -> { openTypstImage(image) } },
+            )
+        }
+    }
     BoxWithConstraints(modifier.fillMaxSize()) {
         val notebookNavigationAvailable = horizontalTabs || maxWidth >= 1040.dp
         Column(
@@ -453,7 +527,10 @@ internal fun WorkspaceContent(
                 typstAvailable = pictures != null && typstRenderer !is UnsupportedTypstRenderer,
                 onViewChange = onViewChange,
                 onAbout = onAbout,
-                aiModels = aiModels
+                aiModels = aiModels,
+                mdTypistDraft = mdTypistDraft,
+                mdTypistConverter = mdTypistConverter,
+                mdTypistExporter = mdTypistExporter
             )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             // Horizontal Tabs Layout: the notebook pane's selection as a strip of section tabs.
@@ -468,7 +545,9 @@ internal fun WorkspaceContent(
             StorageErrorBanner(state.storageError)
             state.graphError?.let { StatusBanner(it) }
 
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+            if (state.activeTab == RibbonTab.MdTypist) {
+                MdTypistPage(state, mdTypistDraft, pageCanvas, Modifier.fillMaxSize())
+            } else BoxWithConstraints(Modifier.fillMaxSize()) {
                 val showNotebookPane = maxWidth >= 1040.dp && state.navigationVisible && !horizontalTabs
                 val showPagePane = maxWidth >= 760.dp && state.pageListVisible
                 val paneMotion = MaterialTheme.motionScheme.defaultSpatialSpec<IntSize>()
@@ -501,64 +580,7 @@ internal fun WorkspaceContent(
                         navigation = navigation,
                         debugLog = debugLog
                     )
-                    CompositionLocalProvider(LocalDensity provides pageDensity) {
-                        WorkspacePage(
-                            debugLog = debugLog,
-                            state = state,
-                            onStateChange = onStateChange,
-                            searchHit = searchHit,
-                            searchRevealTick = searchRevealTick,
-                            searchQuery = pageSearchQuery,
-                            searchImageHighlight = searchImageHighlight,
-                            pictureHighlights = { pictureHighlights.value },
-                            pictures = pictures,
-                            thumbnails = thumbnails.takeIf { view.linkPreviews },
-                            canvasOrigin = canvasOrigin,
-                            keyboardPaste = keyboardPaste,
-                            canvasControl = canvasControl,
-                            placement = placement,
-                            view = view,
-                            input = input,
-                            canvasDark = canvasDark,
-                            showMargins = openPane == DockedPane.PaperSize,
-                            onZoomChange = { zoom -> currentOnViewChange(currentView.copy(zoom = zoom).normalized()) },
-                            onTextShortcut = { event ->
-                                shortcutKeys.dispatch(event, currentBindings, ShortcutScope.TextBox, shortcuts::run) ||
-                                    event.isTextFieldUndo()
-                            },
-                            editorFocusRequester = editorFocusRequester,
-                            canvasFocusRequester = canvasFocusRequester,
-                            modifier = Modifier.weight(1f),
-                            requestEditorFocus = { editorFocusRequest++ },
-                            drawMath = drawMath,
-                            formulaReady = formulaReady,
-                            onInkMath = { selection -> if (formulaReady && state.inkAndLinesSelection && state.selectedInk === selection) {
-                                inkMath = InkMathRequest(selection, state.selectedFormulaLines); openPane = DockedPane.Math } },
-                            onShapeRecognized = { candidate, pen ->
-                                onStateChange { it.createRecognizedShape(candidate, pen) }
-                                debugLog.event("ink") { "recognised shape" }
-                            },
-                            onForceShapeRecognition = { selection ->
-                                onStateChange { it.forceShapeRecognition(selection) }
-                                debugLog.event("ink") { "forced shape recognition" }
-                            },
-                            applyEditorCommand = ::applyEditorCommand,
-                            onLinkRequest = { linkEditor = it },
-                            onEditGraphSliders = { graphSliders = it },
-                            // The formula in the pane as if read off ink; a graph placed from there
-                            // lands below the equation. The pane holds a copy — editing it there
-                            // leaves the equation on the page as it was.
-                            onOpenEquationInMath = { equation ->
-                                inkMath = null
-                                mathSource = equation.latex
-                                mathAnchor = androidx.compose.ui.geometry.Rect(equation.x, equation.y,
-                                    equation.x + equation.width, equation.y + equation.height)
-                                openPane = DockedPane.Math
-                                debugLog.event("math") { "equation opened in pane" }
-                            },
-                            onOpenTypstImage = typstEditImage?.let { image -> { openTypstImage(image) } },
-                        )
-                    }
+                    pageCanvas(Modifier.weight(1f))
                     WorkspaceDockedPane(
                         state = state,
                         onStateChange = onStateChange,
@@ -671,6 +693,14 @@ internal fun WorkspaceContent(
                     },
                 )
             }
+        // Over the whole workspace, not just the MD-Typist page, so the ribbon is covered too.
+        if (state.activeTab == RibbonTab.MdTypist && mdTypistDraft.apiDialog) {
+            MdTypistApiModelDialog(
+                settings = mdTypistDraft.aiSettings,
+                onDismiss = { mdTypistDraft.closeApiDialog() },
+                onApply = { mdTypistDraft.updateAiSettings(it) },
+            )
+        }
 
     }
 }

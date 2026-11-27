@@ -21,7 +21,6 @@ import com.vivenotes.desktop.touch.DesktopTouch
 import com.vivenotes.desktop.update.DesktopUpdates
 import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.localization.Localization
-import com.vivenotes.typst.JvmTypstRenderer
 import com.vivenotes.workspace.LocalPenHaptics
 import com.vivenotes.workspace.PenHaptics
 import com.vivenotes.workspace.PenHardwareEvents
@@ -147,7 +146,11 @@ private fun launchStandardWindow(notes: DesktopNotes, profile: DesktopProfile, l
                     onRecognitionSettingsChange = notes::updateRecognitionSettings,
                     accountHost = notes.sync?.accountHost,
                     aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
-                    typstRenderer = remember { JvmTypstRenderer() },
+                    mdTypistConverter = notes.mdTypistConverter,
+                    mdTypistExporter = notes.mdTypistExporter,
+                    mdTypistAiSettings = notes.localAiSettings,
+                    onMdTypistAiSettingsChange = notes::updateLocalAiSettings,
+                    typstRenderer = notes.typstRenderer,
                     appVersion = DesktopBuildInfo.version, debugLog = log, developmentBuild = profile.developmentBuild,
                     clipboardHtml = notes.clipboardHtml, onDarkThemeChange = { titleBar.dark = it }, updates = updates)
             }

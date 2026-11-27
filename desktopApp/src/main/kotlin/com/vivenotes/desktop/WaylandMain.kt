@@ -33,7 +33,7 @@ internal fun launchWayland(notes: DesktopNotes, profile: DesktopProfile, log: De
     WaylandRendering.prepare()
     DesktopTouch.startWayland(log)
     notes.start()
-    val typstRenderer = JvmTypstRenderer()
+    val typstRenderer = notes.typstRenderer
     val monitor = primaryMonitorArea()
     val initialSize = initialWindowSize(monitor)
 
@@ -105,6 +105,10 @@ private fun createWaylandContent(notes: DesktopNotes, pictures: PictureLibrary, 
             onRecognitionSettingsChange = notes::updateRecognitionSettings,
             accountHost = notes.sync?.accountHost,
             aiModels = notes.aiModels, drawMath = notes.drawMath, search = notes.search,
+            mdTypistConverter = notes.mdTypistConverter,
+            mdTypistExporter = notes.mdTypistExporter,
+            mdTypistAiSettings = notes.localAiSettings,
+            onMdTypistAiSettingsChange = notes::updateLocalAiSettings,
             typstRenderer = typstRenderer,
             appVersion = DesktopBuildInfo.version, debugLog = log, developmentBuild = profile.developmentBuild,
             clipboardHtml = notes.clipboardHtml, onDarkThemeChange = onDarkThemeChange, updates = updates)

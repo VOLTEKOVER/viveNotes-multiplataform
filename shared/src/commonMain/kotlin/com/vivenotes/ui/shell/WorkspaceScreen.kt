@@ -22,6 +22,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalDensity
 import com.vivenotes.ai.AiModels
+import com.vivenotes.ai.LocalAiSettings
 import com.vivenotes.data.PictureLibrary
 import com.vivenotes.data.VideoThumbnailSource
 import com.vivenotes.diagnostics.DebugLog
@@ -39,6 +40,8 @@ import com.vivenotes.ui.keyboard.ShortcutKeys
 import com.vivenotes.ui.keyboard.TextInputSessions
 import com.vivenotes.ui.navigation.NotebookPane
 import com.vivenotes.ui.ribbon.draw.*
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistConverter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistExporter
 import com.vivenotes.ui.ribbon.file.ClosedNotebooksDestination
 import com.vivenotes.ui.ribbon.settings.AboutDialog
 import com.vivenotes.ui.update.AppUpdates
@@ -162,6 +165,11 @@ fun WorkspaceScreen(
     /** This device's recognition models, for Settings → Models; without them it is unavailable. */
     aiModels: AiModels? = null,
     drawMath: DrawMath? = null,
+    /** Turns the selected page's handwriting into Markdown or Typst with a local model server. */
+    mdTypistConverter: MdTypistConverter? = null,
+    mdTypistExporter: MdTypistExporter? = null,
+    mdTypistAiSettings: LocalAiSettings = LocalAiSettings(),
+    onMdTypistAiSettingsChange: (LocalAiSettings) -> Unit = {},
     typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     appVersion: String = Strings.development,
     search: ContentSearchService? = null,
@@ -246,6 +254,9 @@ fun WorkspaceScreen(
                         accountConnected = accountConnected, serverUnreachable = accountUnreachable,
                         onOpenAccount = { accountOpen = true },
                         onAbout = { aboutOpen = true }, aiModels = aiModels, drawMath = drawMath,
+                        mdTypistConverter = mdTypistConverter, mdTypistExporter = mdTypistExporter,
+                        mdTypistAiSettings = mdTypistAiSettings,
+                        onMdTypistAiSettingsChange = onMdTypistAiSettingsChange,
                         typstRenderer = typstRenderer,
                         onExportPdf = { pdfExportOpen = true },
                         search = search, onOpenSearchPage = onOpenSearchPage, shortcutKeys = shortcutKeys,

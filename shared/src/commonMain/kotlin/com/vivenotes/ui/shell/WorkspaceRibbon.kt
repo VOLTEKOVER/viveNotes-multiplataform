@@ -13,6 +13,10 @@ import com.vivenotes.ui.ribbon.document.LinkEditorRequest
 import com.vivenotes.ui.ribbon.document.PictureDialog
 import com.vivenotes.ui.ribbon.draw.DrawRibbon
 import com.vivenotes.ui.ribbon.file.FileRibbon
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistConverter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistDraft
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistExporter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistRibbon
 import com.vivenotes.ui.ribbon.settings.SettingsRibbon
 import com.vivenotes.ui.ribbon.view.ViewActions
 import com.vivenotes.ui.ribbon.view.ViewTab
@@ -57,6 +61,9 @@ internal fun WorkspaceRibbon(
     onViewChange: (ViewSettings) -> Unit,
     onAbout: () -> Unit,
     aiModels: AiModels?,
+    mdTypistDraft: MdTypistDraft,
+    mdTypistConverter: MdTypistConverter? = null,
+    mdTypistExporter: MdTypistExporter? = null,
 ) {
     when (state.activeTab) {
         RibbonTab.File -> FileRibbon(notebookOpen = state.selectedSection != null,
@@ -87,5 +94,6 @@ internal fun WorkspaceRibbon(
             modelsOpen = openPane == DockedPane.Models, onModels = { togglePane(DockedPane.Models) },
             recognitionOpen = openPane == DockedPane.Recognition,
             onRecognition = { togglePane(DockedPane.Recognition) })
+        RibbonTab.MdTypist -> MdTypistRibbon(mdTypistDraft, state, mdTypistConverter, mdTypistExporter)
     }
 }

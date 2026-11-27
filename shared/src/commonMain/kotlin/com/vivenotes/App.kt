@@ -22,6 +22,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import com.vivenotes.ai.AiModels
+import com.vivenotes.ai.LocalAiSettings
 import com.vivenotes.data.ClipboardHtml
 import com.vivenotes.data.NotebookFiles
 import com.vivenotes.data.PictureLibrary
@@ -30,6 +31,8 @@ import com.vivenotes.diagnostics.DebugLog
 import com.vivenotes.typst.TypstRenderer
 import com.vivenotes.typst.UnsupportedTypstRenderer
 import com.vivenotes.ui.canvas.LocalClipboardHtml
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistConverter
+import com.vivenotes.ui.ribbon.mdtypist.MdTypistExporter
 import com.vivenotes.ui.shell.WorkspaceScreen
 import com.vivenotes.ui.account.AccountHost
 import com.vivenotes.ui.ribbon.settings.InterfaceSettings
@@ -84,6 +87,11 @@ fun App(
     /** The platform's recognition models, for Settings → Models. */
     aiModels: AiModels? = null,
     drawMath: com.vivenotes.ui.ribbon.draw.DrawMath? = null,
+    /** Notes → source with a local model server; without one the MD-Typist Convert button says so. */
+    mdTypistConverter: MdTypistConverter? = null,
+    mdTypistExporter: MdTypistExporter? = null,
+    mdTypistAiSettings: LocalAiSettings = LocalAiSettings(),
+    onMdTypistAiSettingsChange: (LocalAiSettings) -> Unit = {},
     /** Compiles pasted Typst/CeTZ diagrams; without one the Draw panel is not offered. */
     typstRenderer: TypstRenderer = UnsupportedTypstRenderer,
     appVersion: String = Strings.development,
@@ -133,6 +141,9 @@ fun App(
                     inputSettings = inputSettings, onInputSettingsChange = onInputSettingsChange,
                     fileActions = fileActions,
                     accountHost = accountHost, aiModels = aiModels, drawMath = drawMath,
+                    mdTypistConverter = mdTypistConverter, mdTypistExporter = mdTypistExporter,
+                    mdTypistAiSettings = mdTypistAiSettings,
+                    onMdTypistAiSettingsChange = onMdTypistAiSettingsChange,
                     typstRenderer = typstRenderer,
                     appVersion = appVersion, search = search, onOpenSearchPage = session::openSearchPage,
                     debugLog = debugLog, developmentBuild = developmentBuild, onDarkThemeChange = onDarkThemeChange,

@@ -1,6 +1,8 @@
 package com.vivenotes.desktop
 
 import com.vivenotes.ai.AiModelStore
+import com.vivenotes.ai.LocalAiHttpClient
+import com.vivenotes.ai.LocalAiSettings
 import com.vivenotes.data.NotebookFiles
 import com.vivenotes.math.BundledMathRuntime
 import com.vivenotes.math.MathEngineRuntime
@@ -72,13 +74,26 @@ internal class DesktopNotes(
     val mathRuntime: MathEngineRuntime? = null,
     private val inkStore: InkSettingsFile? = null,
     private val recognitionStore: RecognitionSettingsFile? = null,
+    /** The local model server MD-Typist asks to write source from the page's handwriting. */
+    private val localAiStore: LocalAiSettingsFile? = null,
     /** Scratch space for this profile: where Import ▸ File stages the document it reads. */
     private val cacheDirectory: File = File(System.getProperty("java.io.tmpdir"), "vivenotes-cache"),
 ) {
+    /** Also used by MD-Typist to rasterize editable CeTZ pictures instead of exporting vector code. */
+    val typstRenderer: com.vivenotes.typst.JvmTypstRenderer by lazy { com.vivenotes.typst.JvmTypstRenderer() }
     private val drawMathDelegate = lazy {
         if (aiModels != null && mathRuntime != null) com.vivenotes.ai.DesktopDrawMath(aiModels, mathRuntime.engine, log) else null
     }
     val drawMath: com.vivenotes.ui.ribbon.draw.DrawMath? get() = drawMathDelegate.value
+    private val mdTypistConverterDelegate = lazy {
+        aiModels?.let { com.vivenotes.ui.ribbon.mdtypist.JvmMdTypistConverter(
+            it, LocalAiHttpClient(), log, DesktopPictures(library.attachments) { null }, typstRenderer) }
+    }
+    val mdTypistConverter: com.vivenotes.ui.ribbon.mdtypist.MdTypistConverter? get() = mdTypistConverterDelegate.value
+    private val mdTypistExporterDelegate = lazy { DesktopMdTypistExporter() }
+    val mdTypistExporter: com.vivenotes.ui.ribbon.mdtypist.MdTypistExporter get() = mdTypistExporterDelegate.value
+    var localAiSettings by mutableStateOf(localAiStore?.load() ?: LocalAiSettings())
+        private set
     val search = com.vivenotes.search.DesktopContentSearch(library.repository, library.attachments,
         com.vivenotes.search.SearchProcessPool(log = log), log)
     /** What browsers and documents copy as HTML, so a paste keeps their headings, lists and marks. */
@@ -101,6 +116,11 @@ internal class DesktopNotes(
     init {
         // What undo, redo and the clipboard can still put back on a page; the picture sweep asks.
         library.attachments.hold(session) { session.heldPictures() }
+    }
+
+    fun updateLocalAiSettings(settings: LocalAiSettings) {
+        localAiSettings = settings
+        localAiStore?.save(settings)
     }
 
     fun updateEditorDefaults(defaults: EditorDefaults) {
@@ -283,6 +303,7 @@ internal class DesktopNotes(
                     // A model download or an install under way stops here; neither leaves a half
                     // package that later reads as installed.
                     if (drawMathDelegate.isInitialized()) drawMathDelegate.value?.close()
+                    if (mdTypistConverterDelegate.isInitialized()) mdTypistConverterDelegate.value?.close()
                     aiModels?.close()
                     mathRuntime?.close()
                     search.close()
@@ -308,6 +329,7 @@ internal class DesktopNotes(
                 shapeStore = ShapeSettingsFile(File(directories.config, "shape.properties")),
                 inkStore = InkSettingsFile(File(directories.config, "ink.properties")),
                 recognitionStore = RecognitionSettingsFile(File(directories.config, "recognition.properties")),
+                localAiStore = LocalAiSettingsFile(File(directories.config, "local-ai.properties")),
                 keyStore = KeyBindingsFile(File(directories.config, "keyboard.properties")),
                 inputStore = InputSettingsFile(File(directories.config, "input.properties")),
                 thumbnails = DesktopVideoThumbnails(File(directories.data, "video_thumbnails")), log = log,
